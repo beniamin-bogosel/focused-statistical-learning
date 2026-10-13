@@ -1,0 +1,162 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{4C: USArrests, scaling, and descriptive groups}{04_C_usarrests.ipynb}{This explanation treats preprocessing as a choice of geometry, distinguishes direction coefficients from correlations, and qualifies what a historical full-data analysis can establish.}
+\section*{Problem statement and scope}
+Describe 50 historical US state records using Murder, Assault, UrbanPop, and Rape.
+The three arrest-rate variables are measured per 100,000 residents for 1973; UrbanPop is a historical urban-population percentage.
+The state names identify rows and are excluded from numerical features.
+We compare principal component analysis (PCA) in original and standardized units, reconstruct a two-component approximation,
+and form descriptive groups. All 50 rows participate; there is no target and no held-out prediction claim.
+
+The notebook uses the conventional textbook table unchanged. The
+\href{https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/USArrests.html}{R dataset documentation}
+notes a transcription error in Maryland's UrbanPop value and rounding issues in some other states.
+In particular, the conventional Maryland entry is 67, while the documented correction is 76.6.
+This concrete example shows why a familiar benchmark should not be treated as unquestionable ground truth.
+A corrected-data comparison would be a separately identified analysis, with potentially different results.
+
+\section{Load the table and understand its scales}
+The small public CSV is downloaded with a 20-second timeout. The first column becomes the DataFrame index;
+only the four named numeric columns are converted to the feature matrix.
+Checks require shape $(50,4)$, unique identifiers, finite numbers, and no missing values.
+These checks detect common import failures, but do not establish the validity of the historical measurements.
+
+\begin{center}\begin{tabular}{lrrr}\toprule
+Feature&Mean&Sample SD&Sample variance\\\midrule
+Murder&7.788&4.3555&18.9705\\
+Assault&170.760&83.3377&6945.1657\\
+UrbanPop&65.540&14.4748&209.5188\\
+Rape&21.232&9.3664&87.7292\\\bottomrule\end{tabular}\end{center}
+Assault's raw variance is much larger than the others. A one-unit change in an arrest rate and a one-percentage-point change
+in urban population have different meanings; adding their squared differences is a modeling decision.
+The large Assault mean is not the reason raw PCA emphasizes it: PCA removes all means before measuring variation.
+
+\code{read_csv(index_col=0)} removes identifiers from the numeric matrix at import.
+\code{std(ddof=1)} and \code{var(ddof=1)} use a divisor of $n-1$; \code{ddof} is the number subtracted from the sample size.
+Columns should be selected by name before converting to an array so their ordering remains explicit throughout interpretation.
+
+\section{Relate standardized PCA to the correlation matrix}
+Let $s_j$ be the sample standard deviation and $Z_{ij}=(X_{ij}-\bar x_j)/s_j$.
+Each standardized column has sample variance 1, so $Z^TZ/(n-1)$ is the sample correlation matrix and its trace is 4.
+Eigenvalues sum to that trace. The notebook checks this identity independently of the displayed variance ratios.
+
+\begin{center}\begin{tabular}{rrrr}\toprule
+PC&Raw PVE&Standardized PVE&Standardized CPVE\\\midrule
+1&0.965534&0.620060&0.620060\\
+2&0.027817&0.247441&0.867502\\
+3&0.005800&0.089141&0.956642\\
+4&0.000849&0.043358&1.000000\\\bottomrule\end{tabular}\end{center}
+PVE is proportion of variance explained; CPVE is its cumulative sum.
+The raw first direction has coefficients approximately $(0.0417,0.9952,0.0463,0.0752)$,
+so its very high PVE mainly summarizes Assault variation in the chosen raw units.
+Standardization distributes numerical emphasis more evenly, producing a less concentrated variance spectrum.
+Neither percentage is a classification accuracy.
+
+The first two standardized direction coefficients are:
+\begin{center}\begin{tabular}{lrr}\toprule
+Feature&PC1&PC2\\\midrule
+Murder&0.535899&$-0.418181$\\
+Assault&0.583184&$-0.187986$\\
+UrbanPop&0.278191&0.872806\\
+Rape&0.543432&0.167319\\\bottomrule\end{tabular}\end{center}
+The sign convention makes the largest-magnitude coefficient in each direction positive.
+PC1 combines positively associated variation across the four variables, with stronger direction coefficients on the arrest-rate features.
+PC2 mainly contrasts higher urban-population percentage with lower values along the Murder and Assault contributions, conditional on this coordinate description.
+It is a linear contrast, not evidence that urbanization causes any change in arrests.
+
+\subsection*{Direction coefficients are not automatically correlations}
+The notebook deliberately labels its table as direction coefficients. For standardized feature column $Z_j$ and score $t_\ell=Zv_\ell$,
+\[
+\operatorname{Cov}(Z_j,t_\ell)=(Sv_\ell)_j=\lambda_\ell v_{j\ell}.
+\]
+Because $\operatorname{Var}(Z_j)=1$ and $\operatorname{Var}(t_\ell)=\lambda_\ell$,
+\[\operatorname{Corr}(Z_j,t_\ell)=\sqrt{\lambda_\ell}\,v_{j\ell}.\]
+Thus a coefficient such as 0.5359 is not itself a correlation. Different sources use the word ``loading'' for different quantities;
+read their definition before comparing tables.
+
+\section{Interpret the score plot and reconstruction}
+Scores give state coordinates. Multiplying a direction and its scores by the same sign leaves every reconstruction unchanged.
+Mixing signed scores with unsigned directions, however, would be an implementation error.
+The notebook uses the original fitted directions for reconstruction and the sign-adjusted coordinates only for interpretation and plotting.
+
+\fig{04_C_usarrests_1.png}{The two-PC score plot describes 86.75\% of standardized variation. Nearby plotted states may still differ in the discarded coordinates.}
+The standardized reconstruction is
+\[\widehat Z=\bar z+(Z-\bar z)V_2V_2^T,\]
+where the PCA fitting mean $\bar z$ is numerically close to zero. Original units are restored by
+$\widehat X_j=\bar x_j+s_j\widehat Z_j$.
+The sum of squared standardized residuals is $49(\lambda_3+\lambda_4)$, about 25.97.
+Per-feature root mean squared errors (RMSEs), after restoring original units, are:
+\begin{center}\begin{tabular}{lr}\toprule
+Feature&Two-PC reconstruction RMSE\\\midrule
+Murder&1.4598\\Assault&28.7552\\UrbanPop&3.3317\\Rape&4.5408\\\bottomrule\end{tabular}\end{center}
+These values quantify approximation of the observed table. Assault's numerically largest RMSE is partly a consequence of its units.
+PCA after scaling minimizes weighted squared errors $\sum_{i,j}(X_{ij}-\widehat X_{ij})^2/s_j^2$,
+not the unweighted sum in original units. The residual summaries therefore belong to a clearly specified optimization geometry.
+
+\section{Select K before interpreting the named groups}
+For each K from 2 to 6, run K-means with 50 starts and keep the lowest inertia. Select the largest mean silhouette in the full
+four-dimensional standardized space, breaking ties toward smaller K.
+\begin{center}\begin{tabular}{rrr}\toprule
+K&Inertia&Silhouette\\\midrule
+2&102.8624&0.408489\\3&78.4840&0.308136\\4&56.4032&0.339689\\
+5&48.9442&0.303078\\6&42.9639&0.288293\\\bottomrule\end{tabular}\end{center}
+The chosen K is 2, under this criterion and candidate set. It is not an estimate of a universally true number of types of states.
+The fitted profiles in original units are:
+\begin{center}\begin{tabular}{rrrrrr}\toprule
+ID&Size&Murder&Assault&UrbanPop&Rape\\\midrule
+0&30&4.870&114.433&63.633&15.943\\
+1&20&12.165&255.250&68.400&29.165\\\bottomrule\end{tabular}\end{center}
+These describe higher versus lower values of the measured arrest variables, with a smaller urban-population difference.
+A cluster ID is not an ordinal score. Renaming group 1 as group 0 changes no mathematical result.
+The groups provide no individual-level inference and no statement about present-day states.
+
+Because scaling is an affine transformation, inverse-transforming a standardized centroid gives the corresponding original-unit group mean.
+That identity does not imply that running K-means directly on unscaled X would produce these groups.
+The latter procedure would minimize a different objective and emphasize different features.
+
+\section{Compare methods in a common evaluation space}
+At the fixed selected K, Ward and average hierarchies use all four standardized features.
+Another K-means fit uses only the first two scores. All silhouettes in this comparison are evaluated using full Z,
+so differences in their reported values do not arise merely from changing the scoring geometry.
+\begin{center}\begin{tabular}{lrr}\toprule
+Method&ARI versus full K-means&Full-space silhouette\\\midrule
+Full K-means&1.000000&0.408489\\Ward&0.919937&0.404794\\
+Average&1.000000&0.408489\\Two-PC K-means&1.000000&0.408489\\\bottomrule\end{tabular}\end{center}
+The two-PC partition happens to agree exactly here. It is important to report that observation instead of claiming dimension reduction
+must change groups. Truncation does change some distances, but this particular optimum remains in the same assignment region.
+Ward's greedy hierarchy differs slightly, illustrating that related squared-error ideas need not yield identical final partitions.
+
+For a full orthogonal basis V, $(ZV)(ZV)^T=ZZ^T$, so all centered row inner products and Euclidean distances are preserved.
+The notebook checks this Gram-matrix identity. After truncation, the omitted part is $ZV_\perp V_\perp^TZ^T$;
+there is no general distance-preservation guarantee. A two-PC plot cannot alone settle the quality of full-space groups.
+
+\fig{04_C_usarrests_2.png}{Ward hierarchy in standardized Euclidean geometry. Heights equal the square root of twice the added within-group squared error. Horizontal leaf ordering is a drawing choice.}
+
+\section{What the stability experiment establishes}
+Ten 40-of-50 subsamples each recompute their own mean, sample standard deviation, and K-means fit at fixed K=2.
+Pairwise overlaps range from 30 to 35 states, with median 32. All 45 shared-row ARIs are 1 in this run.
+Thus the partition is stable under these particular deletions despite the slight method disagreement above.
+Sampling sensitivity and choice-of-method sensitivity are different questions.
+
+Keeping the original scaler for all subsets would assess a fixed-metric clustering procedure; refitting it assesses the combined
+preprocessing-and-clustering procedure used here. Neither choice is universally mandatory, but the experiment must identify which it uses.
+K is held fixed, so the result does not assess how often silhouette would reselect the same K.
+Pairwise scores share fits and should not be treated as 45 independent samples for a standard error.
+Finally, the historical states are not naturally independent interchangeable draws from a simple population;
+this is a sensitivity analysis of the table, not a forecast confidence statement.
+
+\section*{Documentation and practical tips}
+Read the \href{https://scikit-learn.org/1.8/modules/generated/sklearn.decomposition.PCA.html}{PCA API}
+for direction-row orientation and sample covariance conventions, and the
+\href{https://scikit-learn.org/1.8/modules/generated/sklearn.cluster.KMeans.html}{KMeans API}
+for restart and learned-center attributes. Its \code{transform} returns distances to centers, whereas PCA's \code{transform}
+returns principal-component coordinates. Identically named methods can have different mathematical outputs.
+
+The notebook manually uses sample scaling. \code{StandardScaler} uses population standard deviations, smaller by
+$\sqrt{49/50}$ here, so its standardized coordinates are larger by $\sqrt{50/49}$.
+Directions, PVE, silhouettes, and exact K-means minimizing partitions are unchanged by this common positive factor;
+eigenvalues and inertia multiply by $50/49$. Solver stopping tolerances can still produce tiny numerical differences.
+
+Label every plot's coordinate space, retain state identifiers outside numerical features, and keep known data-quality limitations in the interpretation.
+Similarity of aggregate records is not evidence of a causal relation between the measured variables.
+\end{document}

@@ -1,0 +1,128 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{3B: Kernels, curved boundaries, and scaling}{03_B_kernels_and_scaling.ipynb}{This resolution explains the feature-space equivalence, why linear models struggle with the chosen target, and how to interpret the kernel search without selecting from test results.}
+\section*{Problem statement}
+Generate 1,200 independent uniform points on $[-2,2]^2$. The clean label is positive inside the circle
+$x_1^2+x_2^2<1.5$ and negative outside. Independently flip each label with probability 0.08.
+Fit and evaluate these noisy observed labels. The clean boundary is available only because this is a simulation.
+A learner is being asked to predict observed outcomes, not an easier clean target substituted during scoring.
+
+A kernel $K(x,z)$ is an inner product between transformed features. A support vector machine fits a linear
+rule in that feature space, which may have a nonlinear boundary in the original coordinates.
+C balances hinge loss against coefficient norm; RBF gamma controls the distance scale of similarity.
+Both must be chosen using development data rather than the final test.
+
+\section{Generate data and reserve independent roles}
+Simulation seed 17 and stratified split seed 23 give 720 training, 240 validation, and 240 test rows.
+Training has about 31\% positive labels, so accuracy alone rewards a negative-majority predictor.
+Balanced accuracy, the mean of the two class recalls, gives that constant predictor a score of 0.5.
+A pipeline learns scaling only from fitting rows and reuses that transformation for evaluation.
+
+The circle is centered on the origin. For the ideal population distribution, neither $x_1$ nor $x_2$ has
+a simple signed linear association with being inside: points with large positive and large negative coordinates
+are both likely outside. Squared coordinates carry the relevant information. This is a representation issue,
+not evidence that the variables themselves are irrelevant.
+
+\section{Derive and check the quadratic feature map}
+Expand the kernel:
+\[
+(1+x^Tz)^2=1+2x_1z_1+2x_2z_2+x_1^2z_1^2+2x_1x_2z_1z_2+x_2^2z_2^2.
+\]
+It equals the inner product of
+\[\phi(x)=(1,\sqrt2x_1,\sqrt2x_2,x_1^2,\sqrt2x_1x_2,x_2^2).\]
+The square-root factors make each squared coefficient in the dot product equal the required factor 2.
+A map with unweighted columns spans the same polynomial functions but gives them a different Euclidean norm,
+so the same numeric C would impose a different regularization preference.
+
+The notebook first standardizes the original two inputs using training statistics, then applies either the map
+or the matching kernel. It does not standardize mapped coordinates separately. This distinction is essential:
+rescaling the expanded columns would change the kernel identity being tested.
+\code{FunctionTransformer} later wraps the map for use in a pipeline; it computes fixed columns rather than
+learning a new statistical transformation.
+
+With C=1 and tight tolerance, the validation-score difference is about $2.6\times10^{-13}$.
+Both primal objectives are about 237.499742. For the implicit fit, the squared feature-space norm is recovered as
+\[\|w_\phi\|^2=c^TK_{SV}c,\qquad c_i=\alpha_i y_i.\]
+This makes objective comparison possible without explicitly recovering an infinite-dimensional or hidden weight vector.
+The constant map coordinate does not require a second effective intercept: any constant contribution can be
+moved into the unpenalized intercept, reducing its penalized coefficient to zero at an optimum.
+
+\subsection*{Why prediction agreement is a stronger check than a matching label table}
+Two models can make the same signs while assigning very different scores and optimizing different penalties.
+Here the check compares the Gram matrix, real-valued scores, and objective values under matched conventions.
+Numerical tolerance is appropriate because solvers and floating-point kernel calculations can differ slightly.
+
+\section{Choose settings within and across model families}
+Search C in $\{0.01,0.1,1,10\}$. For RBF also search gamma in $\{0.01,0.1,1,10\}$.
+This focused grid avoids very slow large-C linear fits near degeneracy, and uses the ordinary SVC tolerance of 0.001
+for model selection. The separate equivalence check retains its tighter tolerance.
+The grid is a teaching choice, not a claim that stronger penalties could never be useful.
+
+Each of five training folds fits preprocessing and its model on 576 rows and evaluates on 144.
+Logistic regression uses its own loss and penalty convention, even though its inverse-regularization parameter
+also happens to be named C. The explicit and implicit quadratic SVMs use the same feature-space objective.
+\begin{center}\begin{tabular}{lrrr}\toprule
+Family&Selected C&Gamma where relevant&CV balanced accuracy\\\midrule
+Logistic&0.01&---&0.500000\\
+Linear SVM&0.01&---&0.500000\\
+Explicit quadratic&0.1&---&0.899253\\
+Polynomial&0.1&1&0.899253\\
+RBF&10&0.1&0.897455\\\bottomrule\end{tabular}\end{center}
+The explicit quadratic and polynomial models tie; table order selects the explicit representation as the overall family.
+This does not mean the equivalent polynomial rule is inferior. The slightly lower RBF CV value is selection evidence,
+not a precise ranking of the population errors. The chosen setting in each family is refitted on all training rows.
+\fig{03_B_kernels_and_scaling_1.png}{The RBF grid displays held-out balanced accuracy, not training accuracy. Both C and gamma influence fit flexibility.}
+
+\section{Interpret boundaries and the change-of-units diagnostic}
+The model with tiny C and gamma has broad similarities and strong pressure toward a low-norm fit.
+At the opposite fixed diagnostic setting, C=100 and gamma=10 can form much more local boundaries.
+The support-vector circles identify training rows entering the decision rule, not only mislabeled or difficult rows.
+The clean circle is drawn for explanation, not for selecting a model from test performance.
+\fig{03_B_kernels_and_scaling_2.png}{Boundary panels for selected models and two prespecified RBF diagnostics. A smooth curved rule can capture the circle without matching every randomly flipped label.}
+
+Multiply only the first coordinate by 100. Raw squared distance becomes
+$10000(x_1-z_1)^2+(x_2-z_2)^2$. Adjusting one scalar gamma cannot undo this uneven change for every pair.
+With fixed selected RBF settings, raw validation balanced accuracy changes from about 0.8746 to 0.7296.
+The standardized original and rescaled fits both score about 0.8715, and their decision scores agree within tolerance.
+
+Why does standardization restore agreement? For a positive unit multiplier $a$, the transformed mean and scale
+are $a\mu$ and $a\sigma$, so $(ax-a\mu)/(a\sigma)=(x-\mu)/\sigma$.
+The equivalence assumes the scaler is refitted on the correspondingly rescaled training inputs and then reused.
+Fitting a fresh scaler only on validation would be a different, invalid operation.
+The raw original-unit fit happens to score slightly higher here; the purpose of scaling is to control geometry,
+not to guarantee that every finite validation score improves.
+
+\section{Evaluate the frozen models and explain the ranking}
+\begin{center}\begin{tabular}{lrrrr}\toprule
+Model&Accuracy&Balanced accuracy&ROC AUC&Support vectors\\\midrule
+Majority&0.6917&0.5000&0.5000&---\\
+Logistic&0.6917&0.5000&0.5033&---\\
+Linear SVM&0.6917&0.5000&0.4639&447\\
+Explicit quadratic&0.8958&0.8798&0.9177&285\\
+Polynomial&0.8958&0.8798&0.9177&285\\
+RBF&0.9083&0.8925&0.9171&247\\\bottomrule\end{tabular}\end{center}
+The RBF model has higher test accuracy than the CV-selected quadratic model, but the selection remains frozen.
+Its AUC is slightly lower: the metric assesses score ordering rather than decisions at a particular cutoff.
+Linear models largely predict the majority class at their zero cutoffs and fail to describe the radial structure.
+The many support vectors in the linear SVM do not rescue its inappropriate representation.
+
+The clean rule has 92\% expected ordinary accuracy against the independently flipped labels. This is not a
+fixed upper bound on a finite test accuracy, nor the same number as optimal balanced accuracy, whose class
+weighting differs. A test result near 90\% is compatible with both finite-sample model error and unavoidable
+flips; reporting clean-label accuracy instead would change the question.
+
+\newpage
+\section*{Documentation and practical tips}
+The \href{https://scikit-learn.org/1.8/modules/svm.html}{official SVM guide} explains kernel options and
+support-vector prediction. In a polynomial SVC, \code{coef0} belongs to the kernel expression; \code{intercept_}
+is the fitted decision offset. With a pipeline, support vectors are stored in transformed coordinates,
+while \code{support_} can index the original fitting rows for a plot.
+
+\begin{itemize}
+\item Keep the exact feature map and kernel constants together when verifying equivalence.
+\item A constant baseline's ROC AUC is 0.5 even if class imbalance gives much higher accuracy.
+\item Select gamma jointly with C and fix preprocessing first; neither a training plot nor support count alone is a selection metric.
+\item Extreme C can slow optimization without improving held-out performance. A focused grid and documented tolerances are preferable to silently accepting a nonconverged fit.
+\item Preserve the pipeline: saving only support vectors without the input transformation does not preserve the original prediction function.
+\end{itemize}
+\end{document}

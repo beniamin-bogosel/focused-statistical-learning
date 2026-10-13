@@ -1,0 +1,125 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{3D: Solutions to the SVM student exercises}{03_D_student_exercises.ipynb}{This answer key gives the five missing snippets, explains their behavior, and develops checks students can use independently. The original worksheet remains unsolved; completed code was executed separately.}
+\section*{The common model interface}
+A support vector classifier estimates a decision function from labeled examples. A pipeline combines the
+feature transformation and classifier into one fitted object. This matters because the learned boundary
+assumes a specific coordinate system: changing scaling at prediction time changes the question being asked.
+
+\code{StandardScaler} learns one mean and scale per feature. \code{make_pipeline} creates sequential named steps;
+here the fitted classifier is accessible as \code{named_steps["svc"]}.
+The pipeline's \code{fit} first learns scaling on training rows, transforms those rows, and fits the SVC.
+Its prediction methods transform new rows with the stored means and scales before calling the classifier.
+Test targets are never part of these operations.
+
+\section{Exercise 1: separate two overlapping groups}
+\subsection{Problem and data}
+The supplied generator places 400 points in two Gaussian clouds centered at $(-1.5,0)$ and $(1.5,0)$,
+with within-cloud standard deviation 1. The labels are 0 and 1. Split into 320 training and 80 test rows,
+stratifying by label. The clusters overlap, so even a reasonable linear boundary need not classify every row correctly.
+
+A linear SVM learns $f(z)=w^Tz+b$ in standardized coordinates and uses a sign decision.
+It balances a coefficient-norm penalty with hinge losses; C=1 is fixed for this exercise rather than tuned on test data.
+The library handles label encoding internally; manual hinge calculations would convert the labels to $-1,+1$.
+
+\subsection{TODO 1: create and fit the pipeline}
+Replace the first intentional error line with:
+\begin{lstlisting}
+linear_model = make_pipeline(StandardScaler(), SVC(kernel="linear", C=1))
+linear_model.fit(X_train, y_train)
+\end{lstlisting}
+The first line creates unfitted steps; the second learns their state. The input has shape $(320,2)$,
+and the target has one label per row. Do not add an intercept column: SVC learns its own score offset.
+Calling \code{fit} again with test rows would train on the evaluation set, rather than measure generalization.
+
+\subsection{TODO 2: predict labels}
+\begin{lstlisting}
+linear_prediction = linear_model.predict(X_test)
+\end{lstlisting}
+This returns 80 labels without learning new statistics. Replacing this with \code{decision_function}
+would return scores instead of labels and would require an explicit threshold before using classification metrics.
+
+The completed exercise gives 0.925 test accuracy, or 74 correct labels out of 80. The confusion matrix is
+\[\begin{pmatrix}40&0\\6&34\end{pmatrix},\]
+with actual labels as rows and predictions as columns. The model has 80 training support vectors.
+This does not mean 80 training errors, and it has no direct relationship to the coincidentally equal test-set size.
+Support indices refer to rows contributing nonzero dual coefficients in the training fit.
+
+\subsection{Answers and a practical check}
+Test rows must use the training scaler because the classifier's weights and supporting points were learned
+in that standardized coordinate system. Refitting a test scaler makes the same raw input correspond to different
+coordinates. A support vector can be correctly classified on or inside the unit margin, so support does not mean error.
+
+One way to inspect the model is to obtain \code{linear_model.named_steps["svc"].coef_} and its intercept.
+These describe standardized units. To report a boundary in original units, divide each slope by its feature's
+training scale and subtract the mean-adjustment from the intercept. Plotting standardized coefficients directly
+against raw data without this conversion can produce a misleading line.
+
+\section{Exercise 2: separate an inner and outer ring}
+\subsection{Problem and representation}
+The supplied \code{make_circles} call creates 500 noisy points on rings with radius ratio 0.4 and noise scale 0.08.
+Training and test contain 400 and 100 rows. In this generator, the outer and inner rings carry distinct labels.
+A single straight line cannot enclose the inner ring while excluding the outer one on every side.
+
+The radial basis function kernel is
+\[K(z,v)=\exp(-\gamma\|z-v\|^2).\]
+For gamma=1, points at standardized distance 1 have similarity $e^{-1}\approx0.368$;
+at distance 2 their similarity is $e^{-4}\approx0.0183$.
+The classifier can combine many local similarities into a curved score boundary. This does not mean it
+explicitly fits a circle equation: the shape comes from the learned support-vector combination.
+
+\subsection{TODO 3: create and fit the RBF pipeline}
+\begin{lstlisting}
+rbf_model = make_pipeline(StandardScaler(), SVC(kernel="rbf", C=1, gamma=1))
+rbf_model.fit(X_ring_train, y_ring_train)
+\end{lstlisting}
+C and gamma are fixed teaching settings. Gamma changes the distance scale, while C changes the penalty for
+margin violations. Neither is the number of training iterations or the desired number of support vectors.
+Increasing gamma can model finer structure but can also fit noise; it does not monotonically improve held-out performance.
+
+\subsection{TODO 4: compute decision scores}
+\begin{lstlisting}
+ring_scores = rbf_model.decision_function(X_ring_test)
+\end{lstlisting}
+For binary labels 0 and 1, this is a vector of 100 real scores. Positive scores favor class 1;
+negative scores favor class 0. The values are not bounded by zero and one.
+A score of 0.4 cannot be read as a probability of 40\%, and a score of $-0.4$ is not a negative probability.
+
+\subsection{TODO 5: turn scores into decisions}
+\begin{lstlisting}
+ring_prediction = (ring_scores >= 0).astype(int)
+\end{lstlisting}
+The comparison returns Boolean values, and integer conversion gives labels 0 and 1.
+This explicit rule assigns exactly zero to class 1. Library tie conventions need not be assumed identical
+in every implementation, so state the decision rule when comparing custom code at exact ties.
+
+The completed run obtains perfect accuracy on the 100 held-out ring points:
+\[\begin{pmatrix}50&0\\0&50\end{pmatrix}.\]
+There are 35 training support vectors. This sample is well separated at the chosen noise level, but a perfect
+finite test result does not prove zero population error. It also does not show that this kernel or these settings
+are universally preferable to a linear model on other data.
+
+\subsection{Answers to the written questions}
+The RBF combination can represent a curved boundary around the inner ring, unlike a single linear separator.
+Score $-0.4$ predicts label 0 under the specified rule. Increasing gamma makes similarities more local and may
+increase sensitivity to individual training observations; a new tuning study would require validation or CV,
+not repeated selection using this test set.
+
+\newpage
+\section*{Documentation and debugging advice}
+The \href{https://scikit-learn.org/1.8/modules/svm.html}{official SVM documentation} describes the distinction
+between scores, labels, and separately estimated probabilities. Check the installed version when looking up
+constructor options, and inspect \code{classes_} rather than assuming a positive score always means your
+application's chosen event.
+
+\begin{enumerate}
+\item Replace the raised error line itself. Code below an intentional exception does not run.
+\item Run setup and data generation before fitting; restart and run all cells after completing the worksheet.
+\item A single input still needs two-dimensional shape $(1,2)$, not a flat feature vector when calling a matrix-based estimator.
+\item Preserve the pipeline when reusing a model. Saving only the SVC step drops its required transformation.
+\item Distinguish \code{C}, \code{gamma}, support-vector count, and optimization tolerance; they play different roles.
+\item Report the test denominator with accuracy, especially when a small sample produces a perfect score.
+\end{enumerate}
+The supplied evaluation is deliberately simple. The worked notebooks add CV, kernel-equivalence checks,
+and cost-sensitive threshold selection once these basic fitting and prediction operations are understood.
+\end{document}

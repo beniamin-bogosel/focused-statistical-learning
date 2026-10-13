@@ -1,0 +1,134 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{4A: Cluster geometry and stability}{04_A_cluster_geometry.ipynb}{This explanation derives the optimization steps, reconciles different quality measures, and shows what the software outputs do and do not establish.}
+\section*{Problem statement and notation}
+A clustering groups rows without a supplied response variable. Each $x_i\in\mathbb R^p$ is an observation;
+$C_k$ is the set of row indices assigned to group k, and $\mu_k$ is its center.
+K-means minimizes inertia, the within-cluster sum of squared distances,
+\[W=\sum_{k=1}^K\sum_{i\in C_k}\|x_i-\mu_k\|^2.\]
+This objective defines what the algorithm considers a good grouping. It does not define a universally correct grouping.
+We use unscaled coordinates because both simulated features have the same units and specified noise variance.
+There is no train/test accuracy: all rows are used to describe each dataset. Generating labels are reserved for a post-selection check.
+
+\section{Why the Lloyd updates work}
+For a fixed cluster C with mean $\bar x_C$, expand around that mean:
+\[
+\sum_{i\in C}\|x_i-\mu\|^2
+=\sum_{i\in C}\|x_i-\bar x_C\|^2+|C|\|\mu-\bar x_C\|^2.
+\]
+The cross-term vanishes because centered residuals sum to zero. Thus the mean minimizes the loss for a fixed group.
+For fixed centers, the loss separates over rows, so assigning each row to its nearest center minimizes its individual contribution.
+These two facts prove that each alternating step cannot increase W. They do not prove a global minimum:
+a different initial partition can converge to a different fixed point.
+
+The notebook's array of squared distances has shape $(n,K)$: entry $(i,k)$ measures the cost of assigning row i to center k.
+\code{argmin(axis=1)} chooses among centers for each row; using axis 0 would answer a different question.
+An exact tie uses the first index. The teaching loop retains an old center for an empty group;
+this is a declared convention, not a reproduction of every library recovery strategy.
+
+For values $0,2,3,9,10,12$ and starting centers $(0,3)$:
+\begin{center}\begin{tabular}{lrr}\toprule
+Stage&Centers after update&W\\\midrule
+Initial nearest assignments&$0,3$&167\\
+First mean update&$0,7.2$&78.8\\
+Second mean update&$5/3,31/3$&$28/3$\\
+No further change&$5/3,31/3$&$28/3$\\\bottomrule\end{tabular}\end{center}
+The first group initially contains only zero. After its partner center moves to 7.2, the boundary moves from 1.5 to 3.6,
+so values 2 and 3 switch groups. The final midpoint is 6; assignments stop changing.
+Each final group contributes $14/3$ to W. The repeated last value certifies stabilization under these updates, not global optimality in general.
+
+\methods{\code{KMeans.fit} learns centers; \code{labels_} stores fitting-row assignments and \code{inertia_} stores their objective.
+An explicit center array with \code{n_init=1} matches the starting condition. A small tolerance makes the numerical audit precise.
+We compare centers, objective, and partition agreement; label names themselves need not match.}
+
+\section{Read hierarchical merge heights in the correct units}
+Agglomeration chooses the next pair of groups using a linkage criterion. For $\{0,1\}$ and $\{4,6\}$,
+the cross-group distances are 4, 6, 3, and 5. Therefore the last single, complete, and average heights are
+\[\min=3,\qquad\max=6,\qquad\text{mean}=18/4=4.5.\]
+Ward's merge cost follows from the same centroid identity:
+\[
+\Delta(A,B)=W(A\cup B)-W(A)-W(B)
+=\frac{|A||B|}{|A|+|B|}\|\bar x_A-\bar x_B\|^2.
+\]
+Here each group has size 2, their means are 0.5 and 5, and $\Delta=20.25$.
+SciPy displays $\sqrt{2\Delta}=\sqrt{40.5}\approx6.363961$.
+The first two Ward costs are 0.5 and 2, giving displayed heights 1 and 2.
+Their costs sum to $22.75$, which is the squared error about the grand mean of all four rows.
+This is an independent check on the interpretation of height.
+
+\code{linkage} takes an observation matrix or a condensed distance vector. A square distance matrix passed as if it were
+observations can silently cluster its rows as feature vectors. With Ward, use Euclidean observations as in the notebook.
+\code{dendrogram} visualizes the merge table; moving a leaf horizontally does not change its merge history.
+
+\section{Select K using an internal criterion}
+The cloud simulation uses 600 rows from three equally probable Gaussian components, with noise standard deviation 0.6 per coordinate.
+The candidate K values and the rule ``maximize silhouette, then smaller K on a tie'' are specified before inspecting generating labels.
+For each candidate, 20 initializations seek a good inertia value. Results are:
+\begin{center}\begin{tabular}{rrr}\toprule
+K&Inertia&Mean silhouette\\\midrule
+2&2717.382&0.573511\\3&441.976&0.776066\\4&388.267&0.595005\\
+5&338.065&0.437117\\6&288.163&0.324521\\\bottomrule\end{tabular}\end{center}
+The selected K is 3. Extra centers continue to reduce squared error but subdivide the well-separated clouds,
+so silhouette decreases. This example makes the distinction between optimizing centers at a fixed K and selecting K visible.
+
+For row i, silhouette compares its mean distance $a_i$ to other members of its group with the smallest mean distance $b_i$
+to another group: $(b_i-a_i)/\max(a_i,b_i)$. The distance averages involve other observations, not just group centers.
+Singletons have silhouette zero by the library convention. With fewer than two distinct groups, the usual mean silhouette is undefined.
+
+\fig{04_A_cluster_geometry_2.png}{Inertia, silhouette, and the selected cloud partition answer different questions. The numerical labels are arbitrary; the black crosses are fitted centers.}
+The generating-label adjusted Rand index (ARI) is 1 after selection. This confirms agreement with this simulation's components;
+it did not participate in the choice of K. Selecting the highest ARI would turn the experiment into a label-informed task.
+
+Twenty separate random single-start fits at K=3 have minimum and median inertia about 441.976 but maximum about 4153.276.
+This substantial optimization failure explains why the restart count matters even on an apparently easy dataset.
+\code{n_init=20} means 20 starts, not 20 Lloyd iterations; \code{max_iter} controls iterations within a start.
+
+\section{Explain the ring counterexample}
+Generate 600 angles and equally likely radii 1 and 3, then add coordinate noise of standard deviation 0.05.
+Fix K=2 for this separate comparison. Results:
+\begin{center}\begin{tabular}{lrr}\toprule
+Ring method&Silhouette&Generating-label ARI\\\midrule
+K-means&0.339157&$-0.001111$\\Single&0.153329&1.000000\\
+Complete&0.343824&0.138083\\Average&0.319540&0.051850\\Ward&0.344317&0.113648\\\bottomrule\end{tabular}\end{center}
+K-means creates nearest-center regions separated by linear boundaries: comparing squared distances to two centers cancels $x^Tx$.
+Two such regions cannot represent an inner disk versus a surrounding annulus. The poor ARI is a mismatch of geometry, not a coding error.
+Single linkage can follow short local connections around each ring and recovers the simulated groups here.
+However, its lower silhouette is unsurprising: opposite points on one ring may be far apart while points on different rings are relatively close.
+
+\fig{04_A_cluster_geometry_3.png}{All methods recover the separated clouds in this run. Their ring partitions differ because their criteria encode different group shapes.}
+The silhouette ranking and label agreement ranking need not agree because they define quality differently.
+Single linkage also has a weakness not measured by this clean run: a sparse bridge of points can create a chain joining two groups.
+Its perfect ring ARI does not establish universal robustness.
+
+\section{Interpret subsample stability correctly}
+At selected K=3, draw ten independent 480-of-600 subsets without replacement and refit each time.
+There are $\binom{10}{2}=45$ pairwise comparisons. Each compares only shared original row IDs;
+overlap ranges from 377 to 393, with median 385. Every shared-row ARI is 1 in the recorded run.
+This says the separated-cloud partition is insensitive to these row deletions at this fixed K.
+It does not include uncertainty in K selection, because K is deliberately held fixed.
+
+For two partitions, let $n_{ab}$ count rows in group a of one and group b of the other,
+with marginal counts $n_{a\cdot}$ and $n_{\cdot b}$ and m shared rows. Define
+\[
+A=\sum_{a,b}\binom{n_{ab}}2,\quad B=\sum_a\binom{n_{a\cdot}}2,\quad
+D=\sum_b\binom{n_{\cdot b}}2,\quad N=\binom m2.
+\]
+Then, outside degenerate cases handled by convention,
+\[\operatorname{ARI}=\frac{A-BD/N}{(B+D)/2-BD/N}.\]
+Counting pairs explains why renaming IDs has no effect, why chance adjustment can yield negative values,
+and why comparing unrelated row orders is invalid. Pairwise stability scores reuse the same fits and are dependent;
+the displayed quantiles are descriptive, not a confidence interval based on 45 independent experiments.
+
+\section*{Documentation and practical checks}
+The official \href{https://scikit-learn.org/1.8/modules/generated/sklearn.cluster.KMeans.html}{KMeans reference}
+distinguishes \code{predict} (nearest-center IDs) from \code{transform} (distances to every center).
+The \href{https://scikit-learn.org/1.8/modules/generated/sklearn.cluster.AgglomerativeClustering.html}{agglomerative reference}
+provides fitting labels but no ordinary prediction method for new rows. Adding a centroid assignment rule to a hierarchy
+would create an additional method, not recover an implicit library guarantee.
+See also the \href{https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html}{linkage height conventions}
+and the \href{https://scikit-learn.org/1.8/modules/generated/sklearn.metrics.adjusted_rand_score.html}{ARI reference}.
+
+Keep seeds, feature units, distance, restart count, and K-selection rule in the report.
+A stable result can still optimize an inappropriate geometry. Very high silhouette can be driven by a few isolated observations;
+inspect group sizes and plots alongside the scalar score. The lesson is to connect the objective to the scientific or practical grouping question.
+\end{document}

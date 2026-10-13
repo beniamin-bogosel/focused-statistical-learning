@@ -1,0 +1,48 @@
+FocusedContent notebook validation — 13 October 2026
+
+Scope: 11 notebooks from sessions 2–4; session 1 and all lecture/solution PDFs and sources are unchanged.
+
+Markdown word count: 10,513 → 6,434 (38.8% shorter).
+Counts include headings, formulas, tables, and links, using whitespace-separated words.
+Shortening preserves problems, key definitions and formulas, command purposes, questions,
+model selection rules, tie conventions, and distinctions between diagnostics and evaluation.
+
+Notebook                                      Before  After
+02_A_service_regimes.ipynb                      2990   1307
+02_B_carseats.ipynb                              739    553
+02_C_forest_diagnostics.ipynb                   1113    800
+03_A_margins_and_hinge.ipynb                     860    556
+03_B_kernels_and_scaling.ipynb                   733    482
+03_C_oj_score_thresholds.ipynb                   854    542
+03_D_student_exercises.ipynb                     347    236
+04_A_cluster_geometry.ipynb                      822    547
+04_B_pca_compression.ipynb                       779    529
+04_C_usarrests.ipynb                             893    616
+04_D_student_exercises.ipynb                     383    266
+
+Checks:
+- All 11 notebooks pass nbformat schema validation and code-cell syntax checks.
+- Exactly three code cells changed: the Carseats, OJ, and USArrests loaders.
+- Every other code cell is unchanged; notebooks without loader changes retain all saved outputs.
+- Both student worksheets retain their five intentional TODO exceptions and empty outputs.
+- The three dataset notebooks executed completely in fresh kernels using bundled local CSVs.
+- Saved text/table outputs match their prior versions exactly; the local copies preserve numerical results.
+- Dataset files match the larger course copies byte-for-byte. Shape, label counts, and missing values checked.
+- Actual loader code resolves files from the notebook folder, its course root, and a nested data directory.
+- Sessions 2–4 have no remaining network dataset loaders; all other data are generated in their notebooks.
+
+Reproduce using requirements.txt: launch Jupyter from this repository root
+and restart/run each worked notebook. Student templates stop until TODOs are completed.
+Data provenance and SHA-256 checksums are in data/README.txt.
+
+Standalone GitHub package — 13 October 2026
+
+- Four lecture PDFs verified as six pages each; 15 notebooks and 15 solution PDFs included.
+- README.md lists each lecture followed by notebooks, illustrated application explanations,
+  and student exercises/solutions. Lecture 2 correctly points to questions in A–C.
+- All Markdown notebook/README links resolve within the repository; all LaTeX figures are included.
+- Bundled Advertising.csv and changed only its loader code. Fresh-kernel execution succeeds;
+  every text/table output matches the original network-backed notebook.
+- All four CSVs are bundled; no notebook code downloads data. Dependencies now resolve to root requirements.txt.
+- Notebook schemas and code syntax pass. Remaining code and student TODOs are unchanged.
+- Existing PDFs and figures are preserved. LaTeX build scripts now document repository-root commands.

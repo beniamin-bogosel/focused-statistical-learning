@@ -1,0 +1,120 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{3C: OJ purchases and score-based decisions}{03_C_oj_score_thresholds.ipynb}{This resolution explains the prediction setting, score-threshold search, and why a policy can lower cost while making more classification mistakes.}
+\section*{Problem statement and scope}
+The textbook OJ data contain 1,070 purchases: 653 CH and 417 MM. Encode MM as class 1 and CH as 0.
+Predict from PriceCH, PriceMM, DiscCH, DiscMM, SpecialCH, and SpecialMM. The first four describe prices and discounts,
+and the last two promotion indicators. The target Purchase never appears among the inputs.
+This is a specified restricted-feature benchmark, not a claim that the six variables contain every useful predictor.
+
+The SVM learns a decision score $f(x)$. A policy predicts MM when $f(x)\ge t$.
+The costs are assumed: predicting MM for a CH purchase costs 1; predicting CH for an MM purchase costs 3.
+They could represent asymmetric consequences in a teaching scenario, but are not estimated from the records.
+We first select an SVM, then select its threshold using a different data partition.
+
+\section{Load data and reserve partitions}
+The notebook uses the public textbook repository URL with a 20-second network timeout.
+This avoids requiring local course files in Colab. Shape, label-count, and missing-value checks verify the expected data.
+The \href{https://intro-stat-learning.github.io/ISLP/datasets/OJ.html}{OJ data documentation} provides variable context.
+
+Stratification with seed 23 produces 642 training, 214 validation, and 214 test rows.
+Training contains 392 CH and 250 MM records. Price columns have substantially different numerical ranges
+from discount and binary promotion columns; each pipeline standardizes the six columns using fitting rows only.
+The same stores occur in every partition and their week ranges overlap.
+Consequently this random-split result concerns similarly sampled records. It does not show how a model would
+perform in an unseen store or in future weeks, and row-index separation alone cannot establish independence of repeated purchases.
+
+\section{Select model settings without test information}
+For logistic, linear SVM, and RBF SVM, tune C in $\{0.01,0.1,1,10\}$;
+RBF also tunes gamma in $\{0.01,0.1,1,10\}$. Each pipeline includes its own fitting scaler.
+Five training folds have slightly different sizes because 642 is not divisible by five:
+held-out folds have 128 or 129 rows, with the remaining 514 or 513 used to fit.
+
+Mean balanced accuracy gives equal weight to CH recall and MM recall. It does not minimize the later cost directly.
+That separation is deliberate: fitting a useful score and choosing a cost-sensitive cutoff answer different questions.
+\begin{center}\begin{tabular}{lrrr}\toprule
+Family&Selected C&Gamma&CV balanced accuracy\\\midrule
+Logistic&0.1&---&0.622797\\
+Linear SVM&1&---&0.582513\\
+RBF SVM&1&0.1&0.630041\\\bottomrule\end{tabular}\end{center}
+The selected SVM is the RBF model. Logistic regression remains a tuned comparison, not a compulsory loser.
+All three models are refitted on the full training partition and left unchanged thereafter.
+The chosen model's class order is checked as $[0,1]$, so positive SVM scores favor MM.
+
+\section{Inspect scores and search every decision pattern}
+There are only 64 distinct validation scores, giving 65 possible threshold decision patterns.
+Repeated or equivalent input records can receive identical scores. A threshold cannot split a tied-score group
+into different labels without introducing another decision rule.
+
+Let sorted distinct scores be $s_1<\cdots<s_k$. Under the rule $f\ge t$, use cutoffs
+\[-\infty,s_2,s_3,\ldots,s_k,+\infty.\]
+The first predicts MM for every record, the last CH for every record, and each intermediate cutoff excludes
+one more lowest-score group. This covers all patterns without arbitrary fine grid spacing.
+The exact magnitude of a representative cutoff is less important than the group of records it classifies positive.
+
+For every pattern, count false positives FP and false negatives FN and minimize $FP+3FN$.
+Division by 214 converts this to mean cost but does not change its minimum. Among equal-cost cutoffs, use the largest,
+which favors fewer positive predictions. Including extreme policies prevents overlooking an optimum that always predicts one class.
+
+The selected cutoff is approximately $-1.001416$, with validation cost $117/214\approx0.546729$.
+Always predicting MM has cost 130; always predicting CH has cost $3\times84=252$ on validation.
+The plot displays finite cutoffs only, but the extremes remain in the optimization and printed table.
+\fig{03_C_oj_score_thresholds_1.png}{Validation score distributions and threshold costs. The zero cutoff is a default score convention; the selected cutoff reflects this sample and the specified costs.}
+The cost curve is piecewise constant between score values. Connecting or stepping between plotted values is a
+visualization convention, not evidence that costs vary smoothly with every tiny threshold movement.
+
+\section{Why the probability threshold 1/4 does not apply to scores}
+For a true conditional MM probability $p$, the expected cost of predicting MM is $1\times(1-p)$,
+and the cost of predicting CH is $3\times p$. Prefer MM when $1-p\le3p$, hence $p\ge1/4$.
+This derivation concerns a probability scale. A raw SVM score can be negative and has no such scale.
+The selected score near $-1$ is therefore not inconsistent with the probability argument.
+
+Applying $\sigma(f)=1/(1+e^{-f})$ without learning a calibration mapping would merely transform numbers;
+it would not establish that they equal purchase risks. A strictly increasing transform preserves score ordering
+and the possible threshold policies, but changes the numerical cutoff. For example, transforming both scores
+and their selected cutoff monotonically can preserve every decision without improving calibration at all.
+
+After threshold selection, retain the fitted model and scaler. Refitting them on training plus validation
+could change scores and invalidate the cutoff, even if the new model had similar overall accuracy.
+The focused experiment does not perform calibration or report probability losses for these raw scores.
+
+\section{Final test results and the cost--accuracy tradeoff}
+At the default zero-score policies:
+\begin{center}\begin{tabular}{lrrr}\toprule
+Model&Accuracy&Balanced accuracy&ROC AUC\\\midrule
+Training-majority&0.6122&0.5000&0.5000\\
+Logistic&0.6402&0.5935&0.6509\\
+Linear SVM&0.6495&0.5769&0.6480\\
+RBF SVM&0.6776&0.6197&0.6731\\\bottomrule\end{tabular}\end{center}
+ROC AUC evaluates ranking from real scores, not the selected cutoff, and does not require calibrated probabilities.
+It is distinct from both balanced accuracy and operational cost.
+For the selected RBF SVM:
+\begin{center}\begin{tabular}{lrrrrrr}\toprule
+Policy&TN&FP&FN&TP&Accuracy&Cost/record\\\midrule
+Zero score&115&16&53&30&0.6776&0.8178\\
+Validation cutoff&18&113&1&82&0.4673&0.5421\\\bottomrule\end{tabular}\end{center}
+The changed cutoff prevents 52 misses while adding 97 false positives. The cost change is
+\[97-3\times52=-59,\]
+so mean cost falls by $59/214\approx0.2757$ despite the increase in the ordinary error count.
+The selected policy has precision $82/195\approx0.4205$ and recall $82/83\approx0.9880$.
+This is a high-recall, many-false-alarm policy, not a universally better classifier.
+
+For scale, always predicting MM on this test would cost $131/214\approx0.6121$;
+always predicting CH would cost $249/214\approx1.1636$. These transparent reference calculations show what
+an asymmetric-cost improvement means beyond a comparison with the default zero cutoff.
+They do not trigger reselection after test evaluation. The validation-selected policy remains fixed regardless
+of whether any reference happens to look better in another test sample.
+
+\section*{Documentation and practical advice}
+The \href{https://scikit-learn.org/1.8/modules/svm.html}{SVM documentation} distinguishes decision scores from
+probability estimation. Check \code{classes_} when translating score signs, and keep the complete preprocessing
+pipeline when saving a policy. A threshold value without its fitted score function is not a reproducible classifier.
+
+\begin{itemize}
+\item Name the positive event before calculating FP, FN, precision, recall, or cost; reversing labels changes the interpretation.
+\item Search tied scores as groups and include the two constant policies. An arbitrary numeric grid may omit relevant decisions.
+\item A cost minimum fitted on validation has selection noise. Evaluate it once on the reserved test.
+\item Never interpret a price coefficient, support vector, or selected cutoff as evidence of a causal price intervention.
+\item For a future-store objective, change the evaluation design first; better random-split accuracy cannot answer that question on its own.
+\end{itemize}
+\end{document}

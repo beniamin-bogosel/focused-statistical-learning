@@ -1,0 +1,37 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=23mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype,amsmath,amssymb,booktabs,tabularx,array}
+\usepackage{graphicx,xcolor,listings,enumitem}
+\usepackage[section]{placeins}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Statistical learning: worked notebook explanations}
+\rfoot{\thepage}
+\setlength{\headheight}{14pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{2em}
+\setlist{itemsep=3pt,topsep=4pt}
+\lstset{language=Python,basicstyle=\small\ttfamily,breaklines=true,
+ columns=fullflexible,keepspaces=true,showstringspaces=false,
+ frame=single,rulecolor=\color{gray!35},backgroundcolor=\color{gray!4},
+ commentstyle=\color{green!35!black},keywordstyle=\color{blue!65!black},
+ aboveskip=8pt,belowskip=8pt}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\RSS}{\operatorname{RSS}}
+\newcommand{\RMSE}{\operatorname{RMSE}}
+\newcommand{\MAE}{\operatorname{MAE}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\ind}[1]{\mathbf{1}\{#1\}}
+\newcommand{\fig}[2]{\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth,height=0.39\textheight,keepaspectratio]{figures/#1}
+\caption{#2}\end{figure}}
+\newcommand{\notebooktitle}[3]{\begin{center}{\LARGE\bfseries #1\par}\vspace{5pt}
+{\large Problem statement and worked resolution\par}\vspace{5pt}
+Companion to \code{#2}\par\end{center}
+\textbf{How to use this explanation.} #3 Section numbers follow the notebook's numbered sections where present. Numerical values are rounded and refer to the recorded run, not universal performance claims.}
+\newcommand{\methods}[1]{\subsection*{Main Python calls}#1}

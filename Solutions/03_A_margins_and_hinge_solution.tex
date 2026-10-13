@@ -1,0 +1,116 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{3A: Margins, hinge loss, and support vectors}{03_A_margins_and_hinge.ipynb}{This explanation develops the geometry and optimality checks, interprets the actual results, and distinguishes solver facts from statistical conclusions.}
+\section*{Problem and notation}
+For binary labels $y\in\{-1,+1\}$, fit a score $f(x)=w^Tx+b$ and predict $+1$ when $f(x)\ge0$.
+A functional margin is $yf(x)$, and hinge loss is $\max(0,1-yf(x))$. These are score-based quantities, not probabilities.
+We study a five-row exactly solvable example before generating 400 overlapping observations and using cross-validation (CV) to select a linear SVM.
+The small example teaches optimization; the generated data teach prediction, where perfect separation is neither promised nor required.
+
+\section{Certify the small solution}
+The proposed $w=(1,0)$, $b=0$ has functional margins $(3,1,1,1,3)$ on the five rows.
+It satisfies the hard-margin constraints $yf\ge1$. The negative support point requires $w_1-b\ge1$;
+the average of two positive support constraints requires $w_1+b\ge1$. Hence $w_1\ge1$, implying
+$\|w\|^2/2\ge1/2$. The proposed solution attains the bound, so it is optimal.
+
+Why minimize the norm? Rescaling a score by a positive factor does not move its zero boundary.
+Normalizing the closest functional margins to one removes that freedom. The distance between the two
+parallel planes $f=-1$ and $f=1$ is then $2/\|w\|$, so minimizing norm maximizes the geometric margin.
+Do not call the full width 2 the one-sided margin; the latter is 1 here.
+
+The dual coefficients $(0,1/2,1/4,1/4,0)$ give a second certificate:
+\[
+\sum_i\alpha_i y_i=0,\quad w=\sum_i\alpha_i y_ix_i,\quad
+\alpha_i(y_if_i-1)=0.
+\]
+Their sum is 1 and their induced vector norm is 1, giving dual value $1-1/2=1/2$.
+Primal feasibility, dual feasibility, and matching objective values prove optimality.
+The reference \code{SVC} with linear kernel and C=10 matches this solution. It is still a soft-margin solver;
+the checks, not the size of C alone, establish the hard-margin result for these rows.
+\fig{03_A_margins_and_hinge_1.png}{The zero boundary and the two supporting lines. The three circled training rows have nonzero dual coefficients.}
+
+\section{Generate overlapping classes and separate data roles}
+Draw 400 equiprobable labels and independent conditional features $x_1\sim N(1.5y,0.8^2)$,
+$x_2\sim N(0,1)$. The first feature carries the class shift, while the second is noise.
+With simulation seed 17 and stratified split seed 23, obtain 240 training, 80 validation, and 80 test rows.
+Training contains 122 negatives and 118 positives.
+
+\code{StandardScaler} centers and scales coordinates using fitting rows. This determines the geometry
+in which the margin penalty is applied. The full-training scaler used in the derivative check is not reused
+inside CV: each fold fits its own preprocessing. Otherwise held-out rows would influence the representation.
+The marginal distributions overlap, so a correctly implemented SVM can misclassify some future observations.
+
+\section{Understand and check the hinge subgradient}
+Using standardized feature rows $z_i$ and $\beta=(b,w_1,w_2)$, the objective is
+\[
+J(\beta)=\frac1n\sum_i\max(0,1-y_i(w^Tz_i+b))+\frac\lambda2\|w\|^2.
+\]
+For $m_i=y_i(w^Tz_i+b)<1$, the derivative of the hinge contribution with respect to the score is $-y_i$;
+for $m_i>1$ it is zero. Summing active rows gives
+\[g_b=-\frac1n\sum_{m_i<1}y_i,\qquad
+g_w=\lambda w-\frac1n\sum_{m_i<1}y_i z_i.\]
+The denominator is the total number of fitting rows, not the number of active rows. Using the latter would
+change the objective and its relative penalty whenever the active set changed. The intercept has no penalty term.
+
+At margin exactly one, the hinge is not differentiable. A row's loss subgradient may be any convex combination
+of zero and $-y_i(1,z_i^T)^T$. The implementation chooses zero for that row.
+The numerical check deliberately uses a nonzero vector away from every corner and central step $10^{-6}$.
+The returned components are approximately $(0.116667,-0.672343,-0.047437)$ and agree with finite differences.
+At a corner, disagreement with one chosen subgradient would not automatically indicate an error.
+
+This focused notebook checks the derivative without asking students to tune a second optimization algorithm.
+The reference fitting objective is $\|w\|^2/2+C\sum_i\text{hinge}_i$.
+Dividing by $nC$ gives the mean-loss convention with $\lambda=1/(nC)$.
+For the selected full-training C=1, that is $1/240$. Inside each 192-row CV fit the equivalent lambda is $1/192$,
+because this experiment fixes C rather than fixing a mean-loss lambda.
+
+\section{Choose C and interpret the CV comparison}
+Each pipeline joins scaling and a linear SVC. \code{cross_val_score} fits fresh copies on four folds and
+scores the fifth. Stratification keeps both class proportions approximately consistent.
+Balanced accuracy is the average of the negative-class recall and positive-class recall.
+\begin{center}\begin{tabular}{rrr}\toprule
+C&Mean CV balanced accuracy&Fold SD\\\midrule
+0.01&0.970819&0.011414\\0.1&0.962486&0.027159\\1&0.971167&0.018825\\
+10&0.958486&0.025688\\100&0.962833&0.027422\\\bottomrule\end{tabular}\end{center}
+The rule selects C=1 and refits on all training rows. The tiny difference from C=0.01 is not strong evidence
+of an intrinsic advantage. Fold scores share fitting data, and winning a search makes the largest observed
+CV value optimistic as a performance summary. Validation and test rows serve separate assessment roles.
+
+\section{Interpret the conflicting observation diagnostic}
+Add $(2.5,0)$ with label $-1$ to the training set, keeping the original scaler fixed.
+This isolates a fit response to one conflicting example rather than simultaneously changing feature geometry.
+The comparison models are temporary; the original selected model remains untouched.
+\fig{03_A_margins_and_hinge_2.png}{Solid and dashed boundaries show the original and perturbed fits at two fixed C values. These diagnostic fits are not selected against test data.}
+At C=0.01, mean absolute validation score change is about 0.000487. At C=100 it is about 1.13156.
+The latter places much more objective weight on hinge loss relative to coefficient norm in this example.
+This observation does not prove that increasing C always increases boundary displacement.
+
+Support counts change from 156 to 158 at C=0.01 and from 22 to 29 at C=100.
+More support vectors do not necessarily imply worse classification: many can be correctly classified inside
+the unit margin. Mean slack also changes, but note that the post-perturbation mean uses 241 rows rather than 240.
+Decision-score differences do not directly measure geometric distances unless divided by a norm in a specified coordinate system.
+
+\section{Evaluate the original selected fit}
+Validation balanced accuracy is 0.9875. On the final test, the selected model has accuracy and balanced
+accuracy 0.9875, ROC AUC 1.0, and confusion counts
+\[\begin{pmatrix}40&0\\1&39\end{pmatrix},\]
+with true labels as rows and predicted labels as columns. The training-majority baseline gets 0.5 accuracy.
+The fitted model uses 33 support vectors, 17 negative and 16 positive.
+
+Perfect AUC alongside one classification error is possible: all positives may rank above all negatives while
+the fixed zero cutoff still lies on the wrong side of one positive score. AUC evaluates ordering, whereas
+accuracy evaluates one decision rule. The test minimum functional margin is about $-0.5772$, identifying a
+wrong-side example; the median is about 2.6941. These margins are not calibrated confidence levels.
+
+\section*{Documentation, interpretation tips, and common errors}
+The \href{https://scikit-learn.org/1.8/modules/svm.html}{scikit-learn SVM guide} documents scores, support-vector
+attributes, and differences between SVC and LinearSVC. The latter's defaults do not solve the identical
+hinge/intercept problem, so substituting it is not an exact solver check.
+\begin{itemize}
+\item Keep labels in $\{-1,+1\}$ when manually forming $yf$; using 0 for the negative class makes that product meaningless.
+\item In binary SVC, inspect \code{classes_} before deciding which class a positive score favors.
+\item Support indices refer to fitting rows in their supplied order, not original full-dataset identifiers after arbitrary reshuffling.
+\item Scaling affects the model's distance geometry, not just numerical speed. Preserve it with the estimator in a pipeline.
+\item A correctly classified point with margin 0.4 has hinge loss 0.6. Classification error and margin violation are different concepts.
+\end{itemize}
+\end{document}

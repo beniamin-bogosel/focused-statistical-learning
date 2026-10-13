@@ -1,0 +1,137 @@
+\input{preamble.tex}
+\begin{document}
+\notebooktitle{4B: PCA compression and denoising}{04_B_pca_compression.ipynb}{This explanation connects the numerical identities to projection geometry and derives why reconstruction of observations and recovery of signal can favor different dimensions.}
+\section*{Problem statement}
+We first reproduce an exact two-feature PCA calculation. We then generate a three-dimensional signal embedded in 20 features,
+add isotropic noise, and compare several fixed rules for how many components to keep.
+The clean signal is known only because the data are simulated. A rule consulting clean validation rows is called an oracle diagnostic;
+it is not presented as a procedure available for ordinary noisy data.
+
+Let X have n rows and p columns. Centering gives $Z=X-\mathbf1\bar x^T$, with fitting mean $\bar x$.
+Principal component analysis (PCA) finds unit directions of large sample variance. The direction matrix $V_q$ has shape $(p,q)$,
+the score matrix $T_q=ZV_q$ has shape $(n,q)$, and reconstruction is
+\[\widehat X_q=\mathbf1\bar x^T+T_qV_q^T.\]
+The squared Frobenius norm sums entrywise squared errors. Mean squared error (MSE) in this notebook divides that total by np.
+
+\section{The exact calculation and why it verifies more than signs}
+The four rows are $(3,1),(1,3),(-1,-3),(-3,-1)$, whose mean is zero.
+Their sample covariance is
+\[S=\frac1{3}\begin{pmatrix}20&12\\12&20\end{pmatrix}.\]
+Multiplying by $(1,1)^T$ gives $(32/3)(1,1)^T$; multiplying by $(1,-1)^T$ gives $(8/3)(1,-1)^T$.
+After normalization these are orthonormal directions. The first proportion of variance explained (PVE) is
+$32/(32+8)=0.8$, and its scores are $2\sqrt2,2\sqrt2,-2\sqrt2,-2\sqrt2$ under the displayed sign.
+Projecting back gives $(2,2),(2,2),(-2,-2),(-2,-2)$.
+
+For each row, the residual has squared length 2. Thus total error is 8, error per row is 2,
+and error per entry is 1. These are three different quantities obtained from the same residual matrix.
+The singular value decomposition (SVD) has singular values $\sqrt{32}$ and $\sqrt8$.
+Its returned third array in NumPy is $V^T$, so slicing its first row selects a direction, not a column of scores.
+
+A direction and its negative define the same line. A strong numerical check compares
+$V_qV_q^T$, the projection matrix, rather than signs. This also handles rotations among components with repeated eigenvalues.
+The notebook verifies the projector, reconstruction, eigenvalues, PVE, and error identity. A matching scatterplot alone would not detect every transpose or scaling mistake.
+
+\methods{\code{PCA.fit} learns \code{mean_} and direction rows in \code{components_}.
+\code{transform} subtracts that learned mean and returns scores; \code{inverse_transform} maps scores back.
+\code{svd_solver="full"} makes the dense decomposition choice explicit, and whitening remains off.}
+
+\section{What signal and noise mean in the simulation}
+A thin QR decomposition of a seeded $20\times3$ Gaussian matrix creates B with $B^TB=I_3$.
+Draw latent coordinates with variances 9, 4, and 1. The clean signal row is $s=Ba$ and the observed row is
+$x=s+\epsilon$, where $\epsilon$ has covariance $0.25I_{20}$ and is independent of a.
+Therefore population covariance is
+\[\operatorname{Cov}(x)=B\operatorname{diag}(9,4,1)B^T+0.25I_{20}.\]
+Its eigenvalues are $9.25,4.25,1.25$, followed by seventeen values of 0.25.
+Total variance is $14+20(0.25)=19$. Even a perfectly known signal subspace retains only
+$14.75/19\approx77.63\%$ of observed variance. The remaining variance is noise, not necessarily information worth preserving.
+This population calculation anticipates why a 90\% compression cutoff keeps more than three directions.
+
+The split contains 360 fitting rows, 120 validation rows, and 120 test rows. The PCA mean and full 20-direction basis
+are learned only on fitting observations. Clean rows do not enter the PCA fit. The fitting mean norm is about 0.1091;
+it need not be exactly the population mean zero in a finite sample.
+
+No standardization is used for the primary fit because the simulation specifies equal noise variance in the original coordinate system.
+Standardization would weight squared errors differently. ``Always scale before PCA'' is therefore too broad a rule:
+first identify the geometry and noise model relevant to the task.
+
+\section{Why the two error curves behave differently}
+For each $q=0,\ldots,20$, the notebook uses the same learned mean and nested basis.
+At q=0, multiplication through an empty direction matrix yields the fitting mean for every row.
+At q=20, the directions span all 20 feature coordinates, so every input row is reconstructed exactly, apart from rounding.
+This remains true for new rows; no test fitting is required.
+
+For fitting rows, orthogonality gives
+\[
+\|Z-ZV_qV_q^T\|_F^2=(n_{\rm train}-1)\sum_{j>q}\lambda_j.
+\]
+The factor is 359 here. The fitting eigenvalues do not determine the exact residual sum on a different validation sample.
+However, for any fixed row and nested orthogonal projections, adding a direction cannot increase error to that same observed row.
+The validation noisy-error curve is therefore also nonincreasing, without invoking any learning-performance guarantee.
+
+Why can signal error increase? If P is a fixed rank-q projector, independent of new isotropic noise, and the true mean is known,
+\[
+Px-s=-(I-P)s+P\epsilon.
+\]
+The two parts are orthogonal, and $\mathbb E\|P\epsilon\|^2=\sigma^2\operatorname{tr}(P)=q\sigma^2$.
+Thus
+\[\mathbb E\|Px-s\|^2=\|(I-P)s\|^2+q\sigma^2.\]
+Dropping a signal direction creates bias; retaining an extra noise direction adds variance.
+With the exact rank-three projector, ideal per-entry signal error is $3(0.25)/20=0.0375$.
+Estimated directions and means add further finite-sample effects, so this is a reference calculation rather than a prediction of every run's precise MSE.
+
+\fig{04_B_pca_compression_1.png}{Cumulative explained variance and reconstruction curves. More components improve fidelity to observed noise; the clean-signal curve has a different objective.}
+The recorded validation values are:
+\begin{center}\begin{tabular}{rrr}\toprule
+q&Noisy-observation MSE&Clean-signal MSE\\\midrule
+0&1.030729&0.776397\\3&0.224575&0.036037\\
+11&0.128518&0.129609\\20&approximately 0&0.257001\\\bottomrule\end{tabular}\end{center}
+The fitting CPVE rule selects q=11. The clean-validation oracle selects q=3, agreeing with the known simulation dimension.
+The same agreement need not hold under a different realization or noise structure.
+
+\section{Read the final test as an assessment of frozen policies}
+\begin{center}\begin{tabular}{lrrr}\toprule
+Policy&q&Noisy MSE&Signal MSE\\\midrule
+Mean only&0&0.998555&0.760701\\
+Known signal dimension&3&0.224424&0.038227\\
+90\% fitting variance&11&0.118193&0.143124\\
+Clean-validation oracle&3&0.224424&0.038227\\
+Full reconstruction&20&approximately 0&0.259112\\\bottomrule\end{tabular}\end{center}
+The 90\% policy has lower error to observations than q=3 but considerably worse signal recovery.
+Full reconstruction merely reproduces the observed test noise; its signal MSE equals the measured noise MSE, about 0.2591.
+This is close to the generating variance 0.25 but need not equal it exactly.
+The two q=3 rows are identical because they select the same frozen representation, not because one is an independently fitted replicate.
+
+The Frobenius distance between the learned rank-three projector and $BB^T$ is about 0.15197.
+Both projectors have rank 3; the comparison describes orientation error without arbitrary basis signs.
+For rank-q projectors P and Q,
+$\|P-Q\|_F^2=2q-2\operatorname{tr}(PQ)$; smaller distance means greater overlap of their subspaces.
+This diagnostic is available because B is known in the simulation, not because PCA ordinarily reveals a true hidden basis.
+
+\fig{04_B_pca_compression_2.png}{One held-out row. Connected feature indices aid comparison; they do not turn the feature vector into a time series.}
+For 600 stored rows, q=3 uses $600(3)+20(3)+20=1880$ numerical entries versus $600(20)=12000$.
+This is about 15.7\% of the original entry count, including direction and mean overhead.
+The clean basis B is not needed to decode a reconstruction; the learned basis and mean are.
+Compressed file size also depends on numerical precision and format overhead, which this count does not measure.
+
+\section{Changing units changes an unscaled optimization}
+Multiplying feature 1 by 100 changes its squared-error weight by a factor of 10,000.
+The first raw PVE rises from about 0.481773 to 0.998630, showing how a unit convention can dominate the leading direction.
+For a positive multiplier a, the fitted mean and standard deviation become $a\bar x$ and $as$,
+so $(ax-a\bar x)/(as)=(x-\bar x)/s$. Standardized inputs and their PCA projectors consequently agree after a corresponding refit.
+The standardized first PVE remains about 0.370997 in both unit systems.
+This invariance does not demonstrate that standardized PCA is the best denoiser for the original isotropic-noise model.
+
+\section*{Documentation and practical advice}
+The \href{https://scikit-learn.org/1.8/modules/generated/sklearn.decomposition.PCA.html}{PCA reference}
+distinguishes singular values, sample-variance eigenvalues, variance ratios, and component rows.
+The \href{https://scikit-learn.org/1.8/modules/generated/sklearn.preprocessing.StandardScaler.html}{StandardScaler reference}
+uses a divisor-n variance convention; it is separate from PCA's divisor-$n-1$ covariance convention.
+For complete nonconstant columns this changes all standardized coordinates by a common factor compared with sample scaling,
+so PVE and direction orientation agree, while absolute score variances do not.
+
+Preserve the mean and basis together; do not refit them on a prediction batch.
+Keep whitening off when checking the simple score formula $ZV_q$.
+A very high explained variance ratio is not a guarantee of downstream prediction quality.
+Finally, noisy validation reconstruction alone cannot select a denoising dimension here: its optimum is the full reconstruction.
+A usable denoising selection method needs additional assumptions or information, which the notebook deliberately does not pretend to supply.
+\end{document}

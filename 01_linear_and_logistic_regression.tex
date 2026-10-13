@@ -1,0 +1,367 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,booktabs,tabularx,enumitem}
+\usepackage[margin=22mm,headheight=15pt]{geometry}
+\usepackage{xcolor,microtype,fancyhdr,hyperref}
+\definecolor{navy}{HTML}{17365D}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=navy,
+pdftitle={Focused Statistical Learning: Linear and Logistic Regression}}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small Statistical Learning: essentials}
+\fancyhead[R]{\small Linear and logistic regression}
+\fancyfoot[C]{\thepage}
+\setlength{\parindent}{0pt}\setlength{\parskip}{.45em}
+\setlength{\emergencystretch}{2em}
+\setlist{itemsep=.2em,topsep=.3em}
+\newcommand{\T}{^{\mathsf T}}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\idea}[1]{\textcolor{navy}{\textbf{Remember.}} #1}
+\begin{document}
+{\LARGE\color{navy}Linear and logistic regression}\par
+{\large A focused guide to the formulas used in applications A, B, and C}
+
+\section*{1. Linear regression: predict a numerical quantity}
+Let $x_i$ describe an observation and $y_i$ its measured outcome. Linear
+regression predicts a conditional mean: the average outcome at those features.
+For one feature,
+\[
+\widehat y_i=b+w x_i,\qquad r_i=y_i-\widehat y_i.
+\]
+The intercept $b$ is the prediction at $x=0$; the slope $w$ is the predicted
+change in $y$ for one extra unit of $x$. A latency slope of 8 ms/MB means
+one more MB corresponds to 8 additional predicted milliseconds. This is a
+description of the fitted relationship, not automatically a causal effect.
+
+\textbf{Choose the line by least squares.} Minimize the residual sum of squares:
+\[
+\operatorname{RSS}(b,w)=\sum_{i=1}^n(y_i-b-wx_i)^2.
+\]
+Squaring prevents positive and negative errors from canceling and emphasizes
+large misses. At the minimum, differentiating with respect to $b$ gives
+$\sum_i r_i=0$, hence $b=\bar y-w\bar x$. Substitution and differentiation
+with respect to $w$ give
+\[
+\boxed{\widehat w=\frac{\sum_i(x_i-\bar x)(y_i-\bar y)}
+{\sum_i(x_i-\bar x)^2},\qquad
+\widehat b=\bar y-\widehat w\bar x.}
+\]
+The denominator must be positive: a constant feature cannot identify a slope.
+The numerator measures how $x$ and $y$ move together; the denominator accounts
+for the scale of $x$.
+
+\textbf{A calculation to keep in mind.}
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}\toprule
+$x$ & 0&1&2&3\\
+$y$ & 1&2&2&4\\
+$\widehat y=0.9+0.9x$ & 0.9&1.8&2.7&3.6\\
+$r=y-\widehat y$ & 0.1&0.2&$-0.7$&0.4\\\bottomrule
+\end{tabular}
+\end{center}
+Here $\bar x=1.5$, $\bar y=2.25$, the numerator is 4.5, the denominator is 5,
+and RSS is $0.70$. The constant prediction $\bar y$ has RSS $4.75$.
+A better fit on these four rows does not establish better predictions on new rows.
+
+\textbf{Measure prediction error on held-out observations.}
+For $m$ evaluation rows,
+\[
+\operatorname{MAE}=\frac1m\sum_i|y_i-\widehat y_i|,\qquad
+\operatorname{RMSE}=\sqrt{\frac1m\sum_i(y_i-\widehat y_i)^2}.
+\]
+Both have the units of $y$. RMSE penalizes large misses more strongly.
+Always compare with a constant baseline fitted as the \emph{training} mean.
+
+\idea{Least squares fits an average relationship. Individual outcomes still
+vary, and outliers can move the fitted line.}
+
+\newpage
+\section*{2. Multiple features and a readable optimizer}
+For request payload $s$ and queue length $q$, use
+\[
+\widehat y=b+w_s s+w_q q.
+\]
+The slope $w_s$ describes a one-unit increase in payload \emph{holding queue
+length fixed}. Sample coefficients need not equal the simulator's coefficients:
+the sample includes noise and only finitely many observations.
+
+\textbf{Put the intercept in the matrix.} Each design row is
+$X_i=(1,x_{i1},\ldots,x_{ip})$, so
+\[
+X\in\mathbb R^{n\times(p+1)},\quad
+\beta=(b,w_1,\ldots,w_p)\T,\quad
+\widehat y=X\beta.
+\]
+Use one-dimensional arrays of length $n$ for targets and length $p+1$ for
+coefficients. Accidental shapes such as $(n,1)$ versus $(n,)$ can produce
+unintended broadcasting in array code.
+
+\textbf{Fit by a linear algebra solver.}
+The convenient normalized objective and gradient are
+\[
+J(\beta)=\frac1{2n}\|X\beta-y\|^2,\qquad
+\boxed{\nabla J(\beta)=\frac1nX\T(X\beta-y).}
+\]
+The factor $1/2$ cancels the factor 2 from differentiation; it does not change
+the fitted least-squares solution. Setting the gradient to zero gives
+$X\T X\widehat\beta=X\T y$. In code, use
+\code{np.linalg.lstsq(X, y, rcond=None)} rather than explicitly inverting
+$X\T X$. A least-squares solver also handles rank deficiency.
+
+\textbf{Fit by gradient descent to understand learning.}
+\[
+\boxed{\beta\leftarrow\beta-\eta\nabla J(\beta).}
+\]
+Compute predictions, subtract observations, average their feature-weighted
+errors, and take a small step in the opposite direction. Stop when the gradient
+norm is small, with a maximum iteration count. Plot the objective and report
+whether the stopping criterion was reached.
+
+For this quadratic objective, a safe step is $\eta=1/L$ with
+$L=\|X\|_2^2/n$, where $\|X\|_2$ is the largest singular value.
+The notebook computes this from the small design matrix instead of guessing a
+learning rate. Standardizing features usually improves conditioning and speed;
+agreement with the direct solver checks the implementation.
+
+\textbf{Collinearity: coefficients can be less stable than predictions.}
+If $s'=s$, then $w_s s+w_{s'}s'=(w_s+w_{s'})s$: only the sum is identified.
+If $s'$ is merely close to $s$, small data changes can move the two slopes in
+opposite directions. Predictions near the observed feature relationship may
+remain stable. Predictions away from that relationship need not.
+
+\textbf{Residual plots.} Plot training residuals against fitted values and
+individual features. Curves suggest missing structure; changing spread suggests
+nonconstant noise. A visually acceptable residual plot does not establish
+causality or guarantee out-of-sample accuracy.
+
+\idea{Compare custom and reference solvers on the same objective and data.
+Compare model quality on separate observations. These are different checks.}
+
+\newpage
+\section*{3. Scaling, interactions, and controlling complexity}
+\textbf{Learn feature scales from training rows.}
+For a feature with training mean $\mu_j$ and positive scale $a_j$, use
+\[
+z_j=(x_j-\mu_j)/a_j.
+\]
+Reuse those values on validation and test rows. A coefficient on $z_j$ measures
+a change per one scale unit, not per one original unit. Convert a scaled fit
+back with
+\[
+w_j^{\rm original}=w_j^{\rm scaled}/a_j,\qquad
+b^{\rm original}=b^{\rm scaled}-\sum_jw_j^{\rm original}\mu_j.
+\]
+Unpenalized regression with an intercept has the same prediction family under
+invertible scaling. Penalized fits depend on the scales, so standardization is
+part of the model specification. Handle constant features explicitly.
+
+\textbf{Ridge stabilizes slopes by shrinking them.}
+\[
+\boxed{J_\lambda(\beta)=\frac1{2n}\|X\beta-y\|^2
++\frac\lambda2\sum_{j=1}^p w_j^2.}
+\]
+The intercept is not penalized. Larger $\lambda$ places more weight on small
+slopes. This can reduce variability at the cost of bias; improvement is checked,
+not presumed. Ridge usually shrinks rather than deletes features.
+Its gradient adds $\lambda(0,w_1,\ldots,w_p)\T$.
+The notebook's reference \code{Ridge} uses RSS plus \code{alpha} times the
+squared slope norm, so use $\code{alpha}=n\lambda$, with the current fitting
+sample size, including inside a CV fold.
+
+\textbf{An interaction makes one slope depend on another feature.}
+For advertising budgets in thousands of dollars and sales in thousands of units,
+\[
+\widehat{\mathrm{sales}}=b+w_T\mathrm{TV}+w_R\mathrm{radio}
++w_{TR}\mathrm{TV}\,\mathrm{radio}.
+\]
+An extra \$1,000 of TV spending corresponds to a predicted sales change
+$w_T+w_{TR}r$ thousand units at radio budget $r$. At $r=30$, use
+$1000(w_T+30w_{TR})$ to express the change in units. Retain both main effects
+when adding this interaction. The model remains linear in its coefficients.
+
+\textbf{A small, honest selection protocol.}
+\begin{enumerate}
+\item Reserve 60\% training, 20\% validation, and 20\% test before exploring
+      target relationships. Use stratification for binary labels.
+\item Select candidates or penalties using five-fold CV on training rows only.
+      Refit preprocessing inside each fold; average its held-out scores.
+\item Refit the selected model on the training partition. Use validation for
+      an audit or a decision threshold. Freeze the model and policy.
+\item Evaluate the frozen choices on the final test. Do not revise them from
+      the test results and still call that test independent.
+\end{enumerate}
+For these independent examples, random splits are appropriate teaching choices.
+Repeated customers or future-time prediction would require different splits.
+
+\idea{A coefficient describes a conditional association. Adding a useful
+predictor or interaction does not turn observational data into an experiment.}
+
+\newpage
+\section*{4. Logistic regression: predict an event probability}
+For a binary target $y\in\{0,1\}$, turn a linear score into a probability:
+\[
+z=b+x\T w,\qquad
+\boxed{\pi(x)=\sigma(z)=\frac1{1+e^{-z}}.}
+\]
+The score can be any real number, while $0<\pi<1$. At scores $-2,0,2$,
+the probabilities are approximately $0.119,0.5,0.881$.
+Logistic regression estimates probabilities; a decision threshold is a separate
+choice made after fitting.
+
+\textbf{Coefficients change log odds.}
+\[
+\log\frac{\pi(x)}{1-\pi(x)}=b+x\T w.
+\]
+Increasing feature $j$ by one original unit multiplies the odds by $e^{w_j}$,
+holding other features fixed. It does not multiply the probability by this
+amount. The probability change depends on the starting score.
+For example, $z=-2+0.7x_1-0.4x_2$ at $(2,1)$ gives $z=-1$ and
+$\pi\approx0.269$.
+
+\textbf{Fit probabilities using log loss.}
+A Bernoulli observation has likelihood $\pi_i^{y_i}(1-\pi_i)^{1-y_i}$.
+Taking the negative logarithm and averaging gives
+\[
+J(\beta)=-\frac1n\sum_i\left[y_i\log\pi_i+(1-y_i)\log(1-\pi_i)\right].
+\]
+A confident wrong prediction is expensive: predicting 0.01 for an event that
+occurs contributes $-\log(0.01)\approx4.605$. Predicting 0.9 contributes only
+$0.105$. Optimize probabilities, not thresholded classification accuracy.
+
+\textbf{The gradient has the same pattern as linear regression.}
+With the intercept included in $X$ and $\pi=\sigma(X\beta)$,
+\[
+\boxed{\nabla J(\beta)=\frac1nX\T(\pi-y).}
+\]
+For one row $(1,2)$ with $y=1$, zero coefficients give $\pi=0.5$ and gradient
+$(-0.5,-1)$. A step of size 0.1 gives coefficients $(0.05,0.1)$, score 0.25,
+and probability approximately 0.562. The update moves toward the observed label.
+
+\textbf{Use numerically stable code.}
+Compute probabilities with \code{scipy.special.expit}. For binary labels,
+each log-loss term is
+\[
+\log\!\left(1+e^{(1-2y_i)z_i}\right),
+\]
+evaluated as \code{np.logaddexp(0, (1 - 2*y) * scores)}. This avoids
+overflowing exponentials and taking a logarithm of a rounded zero probability.
+Check the analytic gradient against central finite differences before optimizing.
+
+\textbf{Regularize when needed.} Add $\lambda\|w\|^2/2$ to mean log loss,
+leaving the intercept free. The gradient adds $\lambda(0,w\T)\T$.
+With perfectly separable labels, an unpenalized logistic fit can drive slopes
+toward infinity instead of having a finite optimum. A positive slope penalty
+controls this behavior when both classes are present.
+
+\newpage
+\section*{5. Probability quality and decision quality}
+\textbf{Evaluate probabilities before choosing a threshold.}
+Compare mean log loss and the Brier score,
+\[
+\operatorname{Brier}=\frac1m\sum_i(y_i-\widehat\pi_i)^2,
+\]
+with a baseline predicting the \emph{training prevalence}
+$\bar y_{\rm train}$ for every row. Smaller values are better.
+A calibration plot groups predictions and compares each group's mean probability
+with its observed event rate. Small groups make this plot noisy.
+
+\textbf{Make a decision using a threshold $t$.}
+Predict event 1 when $\widehat\pi\ge t$. Lowering $t$ typically catches more
+events but also raises more false alarms. In the confusion matrix, rows are
+actual labels and columns are predicted labels:
+\[
+\begin{pmatrix}\mathrm{TN}&\mathrm{FP}\\\mathrm{FN}&\mathrm{TP}\end{pmatrix}.
+\]
+\[
+\operatorname{precision}=\frac{\mathrm{TP}}{\mathrm{TP}+\mathrm{FP}},\qquad
+\operatorname{recall}=\frac{\mathrm{TP}}{\mathrm{TP}+\mathrm{FN}}.
+\]
+Precision asks how often an alarm is correct; recall asks how many events are
+caught. State a convention if a denominator is zero. A precision--recall curve
+shows their tradeoff over thresholds. Accuracy alone can conceal missed events
+when the event is rare.
+
+\textbf{Costs give a useful theoretical threshold.}
+Suppose a false positive costs $c_{\rm FP}$, a false negative costs
+$c_{\rm FN}$, and correct decisions cost zero. At event probability $\pi$,
+\[
+\text{cost of predicting 1}=c_{\rm FP}(1-\pi),\qquad
+\text{cost of predicting 0}=c_{\rm FN}\pi.
+\]
+Choose 1 when its expected cost is no larger, giving
+\[
+\boxed{t=\frac{c_{\rm FP}}{c_{\rm FP}+c_{\rm FN}}.}
+\]
+For costs 1 and 5, $t=1/6$. At probability 0.2, expected costs are 0.8 for
+an alarm and 1.0 for no alarm, so raising an alarm is preferable. This calculation
+assumes appropriate probabilities and the stated costs.
+
+Alternatively, choose a threshold using validation observations to minimize
+$(\mathrm{FP}+5\mathrm{FN})/m$. Sampling variation and imperfect probabilities
+can make it differ from $1/6$. Freeze the threshold before test evaluation.
+Do not refit the scoring model afterward without reconsidering validation:
+its probability scale may change.
+
+\textbf{One more regression metric.} Application B also reports
+\[
+R^2=1-\frac{\sum_i(y_i-\widehat y_i)^2}
+{\sum_i(y_i-\bar y_{\rm eval})^2}.
+\]
+It can be negative on held-out rows and is undefined for constant evaluation
+targets. The evaluation mean occurs in this definition; it must not be used
+to fit the baseline predictor.
+
+\idea{Select models with an appropriate loss. Select actions with a threshold
+and costs. Evaluate both on observations that did not select them.}
+
+\newpage
+\section*{6. The three companion notebooks}
+Each notebook puts statements before code and runs independently. Use seed 17
+for simulation and seed 23 for the 60/20/20 split. Full tasks and outputs are
+in the notebooks.
+
+\subsection*{A. Request latency, optimization, and collinearity}
+\code{A\_request\_latency.ipynb}
+\[
+s\sim U(0.5,10),\quad q\sim\operatorname{Poisson}(3),\quad
+\epsilon\sim N(0,12^2),\qquad y=40+8s+3q+\epsilon,
+\]
+with $n=600$ independent requests and latency in ms.
+Fit mean, payload-only, and two-feature predictors. Compare the scalar formula,
+least squares, gradient descent, and a reference solver. Add $s'=s+N(0,0.02^2)$;
+use resampling to contrast slope and prediction variability. Select ridge by
+training CV, inspect its path and residuals, and report test MAE/RMSE.
+\textbf{Main lesson:} a stable prediction does not require each correlated
+coefficient to be stable. Scaling aids optimization; ridge changes the objective.
+
+\subsection*{B. Advertising, multiple features, and interactions}
+\code{B\_advertising.ipynb}
+
+Use the local 200-market \code{Advertising.csv}. The predictors are TV, radio,
+and newspaper budgets; the target is sales. Drop the CSV row index. Budgets and
+sales are in thousands of dollars and thousands of units.
+
+Compare the mean baseline, TV-only, additive, and TV/radio/interaction candidates
+on identical training CV folds. Interpret $w_T+w_{TR}r$ at radio budgets 0 and 30.
+Inspect residuals; report frozen-model test MAE, RMSE, and $R^2$ against the baseline.
+\textbf{Main lesson:} feature construction can matter more than changing the
+optimizer. Select the relationship using held-out training folds.
+
+\subsection*{C. Probability of a latency-budget violation}
+\code{C\_budget\_violation.ipynb}
+\[
+z=-4+0.35s+0.3q-1.2c,\quad \pi=\sigma(z),\quad y\sim\operatorname{Bernoulli}(\pi),
+\]
+with $n=2000$, $s\sim U(0.5,10)$, $q\sim\operatorname{Poisson}(3)$,
+and $c\sim\operatorname{Bernoulli}(0.4)$ independent. Cache hit $c$ is
+available at arrival. This is a separate generator, not a threshold of A's latency.
+Check the stable loss gradient and compare optimizers. Select an $L_2$ penalty
+by training CV log loss and a validation threshold for costs 1 and 5.
+Evaluate probability quality, calibration, precision--recall, and the prespecified
+test policies at $0.5$, $1/6$, and the selected threshold.
+\textbf{Main lesson:} accurate probabilities and a useful alarm policy are
+related but different objectives.
+
+\small\textbf{Further reading.} The full first lecture is in \code{PdfLectures}.
+The bundled book is James et al., \emph{An Introduction to Statistical Learning
+with Applications in R}, 2nd ed. (2021), Chapters 3, 4.3, and 6.2.1.
+\end{document}

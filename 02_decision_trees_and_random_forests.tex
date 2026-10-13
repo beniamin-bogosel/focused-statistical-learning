@@ -1,0 +1,364 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,booktabs,tabularx,enumitem}
+\usepackage[margin=22mm,headheight=15pt]{geometry}
+\usepackage{xcolor,microtype,fancyhdr,hyperref}
+\definecolor{navy}{HTML}{17365D}
+\hypersetup{colorlinks=true,linkcolor=navy,urlcolor=navy,
+pdftitle={Focused Statistical Learning: Decision Trees and Random Forests}}
+\pagestyle{fancy}\fancyhf{}
+\fancyhead[L]{\small Statistical Learning: essentials}
+\fancyhead[R]{\small Trees and random forests}
+\fancyfoot[C]{\thepage}
+\setlength{\parindent}{0pt}\setlength{\parskip}{.45em}
+\setlength{\emergencystretch}{2em}
+\setlist{itemsep=.2em,topsep=.3em}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\idea}[1]{\textcolor{navy}{\textbf{Remember.}} #1}
+\begin{document}
+{\LARGE\color{navy}Decision trees and random forests}\par
+{\large A focused guide to the formulas used in applications A, B, and C}
+
+\section*{1. A tree is a sequence of questions}
+A tree routes an input through tests such as ``queue length $q\le3$?'' and
+``payload $s\le5$ MB?''. Each terminal node, or \emph{leaf}, stores a prediction
+learned from the training rows that reach it. Depth counts tests on the longest
+path; a root-only tree has depth zero. A stump has one split and two leaves.
+
+A tree can represent the conditional mean in application A:
+\[
+f(s,q)=\begin{cases}
+40\text{ ms},&q\le3,\\
+60\text{ ms},&q>3,\ s\le5,\\
+90\text{ ms},&q>3,\ s>5.
+\end{cases}
+\]
+Payload matters only when the queue is long: the tree expresses an interaction
+without requiring a product feature. Ordinary numerical tests create axis-aligned
+regions and constant predictions within each region. They do not smoothly
+extrapolate beyond the observed feature range.
+
+\textbf{Regression: predict the mean inside a leaf.}
+For rows $A$ in a leaf, minimizing $\sum_{i\in A}(y_i-c)^2$ gives
+\[
+\boxed{c_A=\bar y_A,\qquad
+\operatorname{RSS}(A)=\sum_{i\in A}(y_i-\bar y_A)^2.}
+\]
+Indeed the derivative with respect to $c$ is $2|A|c-2\sum_{i\in A}y_i$.
+For a feature $j$ and threshold $t$, split into $A_L=\{i:x_{ij}\le t\}$
+and $A_R=\{i:x_{ij}>t\}$. Choose the admissible split with smallest
+$\operatorname{RSS}(A_L)+\operatorname{RSS}(A_R)$. Reject empty or too-small children.
+
+\textbf{A split you can verify.} Take $x=(1,2,3,4,5,6)$ and
+$y=(2,3,2,8,9,10)$. Parent RSS is $208/3$.
+\begin{center}
+\begin{tabular}{@{}lrrrrr@{}}\toprule
+Threshold & 1.5 & 2.5 & 3.5 & 4.5 & 5.5\\
+Child RSS total & 53.2 & 39.25 & $8/3$ & 25.25 & 46.8\\\bottomrule
+\end{tabular}
+\end{center}
+The winning split is $x\le3.5$. The leaf predictions are $7/3$ and 9;
+training RMSE is $\sqrt{(8/3)/6}=2/3$. The RSS reduction also equals
+\[
+\boxed{\frac{n_Ln_R}{n_L+n_R}(\bar y_L-\bar y_R)^2,}
+\]
+so a split helps when the child means differ, with their sizes taken into account.
+
+\textbf{Efficient search.} Sort each feature; test midpoints only between
+distinct values. Prefix sums $S_k=\sum_{i\le k}y_{(i)}$ and
+$Q_k=\sum_{i\le k}y_{(i)}^2$ give left RSS $Q_k-S_k^2/k$ and the analogous
+right RSS. Center responses first to reduce cancellation from a large common
+offset. Sorting costs $O(n\log n)$; scanning then costs $O(n)$ per feature.
+
+\idea{Split selection fits the training data. A low training RSS is not an
+estimate of how well the tree predicts new observations.}
+
+\newpage
+\section*{2. Classification: keep the leaf probabilities}
+For a binary target $y\in\{0,1\}$, a leaf estimates the positive probability as
+\[
+\boxed{\widehat\pi_A=\frac{\#\{i\in A:y_i=1\}}{|A|}.}
+\]
+Classify as 1 if $\widehat\pi_A\ge t$ under our explicit tie convention.
+The threshold $t$ is a decision choice; it is not part of learning the split
+criterion. A leaf with one positive row gives probability 1 but very little
+evidence about future certainty. Minimum leaf size helps control this variability.
+
+\textbf{Gini impurity measures class mixing.}
+Write $G(A)$ for the Gini impurity of node $A$. For class fractions $p_1,\ldots,p_K$,
+\[
+G(A)=1-\sum_{k=1}^Kp_k^2,\qquad
+G(A)=2\widehat\pi_A(1-\widehat\pi_A)\quad\text{in the binary case}.
+\]
+Gini is zero for a pure leaf and largest when classes are balanced. It is the
+probability that two independent draws from the leaf's empirical label distribution
+disagree. Entropy $H(A)=-\sum_kp_k\log p_k$, with $0\log0=0$, is another
+common measure; it also favors purer groups.
+
+\textbf{Weight child impurities by their sizes.}
+Here $I(A)$ is a \emph{generic name for the chosen impurity}, not a new measure:
+use $I(A)=G(A)$ for Gini, or $I(A)=H(A)$ for entropy.
+With $n_A=|A|$ and child sizes $n_L,n_R$, maximize
+\[
+\boxed{\operatorname{gain}=I(A)-\frac{n_L}{n_A}I(A_L)
+-\frac{n_R}{n_A}I(A_R).}
+\]
+Without these weights, a tiny pure child would receive too much influence.
+For regression, $I(A)=\operatorname{RSS}(A)/n_A$ gives the same split ranking
+as minimizing total child RSS.
+
+\textbf{A better probability split can leave accuracy unchanged.}
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}\toprule
+Node & Positive & Negative & $\widehat\pi$ & Gini\\\midrule
+Parent & 8 & 2 & 0.8 & 0.32\\
+Left child & 5 & 0 & 1 & 0\\
+Right child & 3 & 2 & 0.6 & 0.48\\\bottomrule
+\end{tabular}
+\end{center}
+Weighted child Gini is $0.5(0)+0.5(0.48)=0.24$, so gain is $0.08$.
+At threshold 0.5 both children still predict 1, leaving the same two mistakes.
+Gini detects a useful change in probability structure that immediate accuracy misses.
+
+\textbf{Categorical inputs need explicit treatment.}
+In Carseats, shelf location is nominal. One-hot indicators such as
+\code{ShelveLoc\_Good} permit the test ``Good versus not Good''.
+Arbitrary integer codes silently impose a split ordering. Fit the encoder on
+the fitting rows and specify what happens to a category not seen there.
+The notebooks use all-zero indicators for an unknown category.
+
+The target is $Y=\mathbf1\{\code{Sales}>8\}$, so \code{Sales} must be
+excluded from the inputs. A predictor measured only after the outcome would also
+be unusable for a genuine advance prediction.
+
+\idea{Use leaf probabilities for probability metrics and cost-sensitive decisions.
+A hard class prediction throws away their degree of certainty.}
+
+\newpage
+\section*{3. Control a tree's complexity}
+Tree construction is greedy: choose the best current split and repeat in each
+child. The first split is not reconsidered after later splits. A useful deeper
+structure may require an initially weak split, so greedy fitting need not find
+the best possible tree. Small changes in training rows can also change early tests.
+
+\textbf{Two direct controls.} Smaller maximum depth limits the number of tests;
+larger minimum leaf size requires each prediction to average more observations.
+More complex trees usually fit training data better but may fit noise.
+Strictly increasing feature transformations preserve candidate partitions in
+exact arithmetic, so trees usually need no standardization. One-hot encoding
+and feature availability still matter.
+
+\textbf{Pruning puts a price on every leaf.}
+Grow a larger tree and consider its subtrees. Minimize
+\[
+\boxed{R_\alpha(T)=R(T)+\alpha L(T),\qquad \alpha\ge0,}
+\]
+where $L(T)$ is the leaf count. In regression,
+$R(T)=\sum_{\ell}\operatorname{RSS}(A_\ell)/n$; for Gini classification,
+$R(T)=\sum_\ell(n_\ell/n)G(A_\ell)$. Larger $\alpha$ favors fewer leaves.
+The regression penalty has squared-response units; the Gini penalty has a
+different scale. Using raw RSS instead of normalized RSS multiplies equivalent
+penalties by $n$.
+
+For the six-row example, consider a tree with a root test at 3.5 and an
+additional right-branch test at 4.5:
+\begin{center}
+\begin{tabular}{@{}lrrl@{}}\toprule
+Subtree & Leaves & $R(T)$ & Penalized risk\\\midrule
+Keep both tests & 3 & $7/36$ & $7/36+3\alpha$\\
+Keep root only & 2 & $4/9$ & $4/9+2\alpha$\\
+No tests & 1 & $104/9$ & $104/9+\alpha$\\\bottomrule
+\end{tabular}
+\end{center}
+The first two options tie at $\alpha=1/4$; the last two at $100/9$.
+Choose the smaller tree at a tie. These are training tradeoffs among subtrees;
+cross-validation is still needed to select predictive complexity.
+
+\textbf{The same evaluation discipline as regression applies.}
+\begin{enumerate}
+\item Make 60/20/20 train/validation/test partitions before target exploration;
+      stratify binary labels in these independent-data examples.
+\item Compare a prespecified parameter grid using five-fold training CV.
+      Grow a fresh tree and fit preprocessing inside each fold.
+\item Select by RMSE for regression or Brier score for binary probabilities.
+      Fit the selected configuration on the training partition.
+\item Use validation for an audit, probability/threshold checks, or exploratory
+      importance. Freeze the model and policy before the final test.
+\end{enumerate}
+Do not grow a full-data tree first and reuse its learned splits across CV folds.
+Repeated customers or future-time prediction need appropriate group/time splits.
+
+\idea{Pruning changes the tree. Cross-validation chooses the setting. A separate
+test estimates the performance of the resulting frozen procedure.}
+
+\newpage
+\section*{4. Bagging and random forests: average unstable trees}
+\textbf{Bagging.} Draw $n$ training indices \emph{with replacement}, fit a tree,
+and repeat $B$ times. Repeated indices retain their multiplicity. Average the
+predictions:
+\[
+\widehat f_B(x)=\frac1B\sum_{b=1}^B\widehat f_b(x),\qquad
+\widehat\pi_B(x)=\frac1B\sum_{b=1}^B\widehat\pi_b(x).
+\]
+Regression averages numerical responses; classification here averages positive
+probabilities. Always check class-column ordering when reading probability arrays.
+
+\textbf{Averaging probabilities is not the same as majority voting.}
+For five tree probabilities $(0.2,0.3,0.4,0.9,0.95)$, the average is 0.55,
+so the averaged-probability rule predicts 1 at threshold 0.5. Thresholding each
+tree first gives three votes for 0 and two for 1: majority voting predicts 0.
+Record which rule the implementation uses.
+
+\textbf{Why averaging helps.} At one fixed input, suppose each fitted tree
+prediction has variance $\sigma_T^2$ across repeated training experiments,
+and pairs have common correlation $\rho$. Then
+\[
+\boxed{\operatorname{Var}\!\left(\frac1B\sum_b\widehat f_b\right)
+=\sigma_T^2\left(\rho+\frac{1-\rho}{B}\right).}
+\]
+Expand the variance of a sum: $B$ individual variance terms plus $B(B-1)$
+covariance terms, all divided by $B^2$. With variance 16 and correlation 0.25,
+ensemble variance is 16, 5.2, and 4.12 for $B=1,10,100$; the limit is 4.
+Adding trees reduces the unshared variation but cannot remove the shared part.
+
+\textbf{Random forests also randomize candidate features.}
+At every node, offer a random subset of $m$ columns to the split search rather
+than always offering all $p$. This can make trees less similar. It can also
+weaken individual splits, so choose $m$ by predictive evaluation.
+With $m=p$, bootstrap forests behave as bagged trees under the same controls.
+The subset is sampled anew at each node, not once for the whole forest.
+
+\textbf{Two controls with different jobs.}
+Increasing $B$ stabilizes the average and increases time/storage. Changing
+depth, minimum leaf size, or $m$ changes the fitted rule and its bias/variance
+tradeoff. Many trees cannot rescue unavailable features, leakage, a wrong target,
+or irreducible outcome noise.
+
+\textbf{Do not confuse two notions of correlation.}
+Correlating two trees' prediction vectors across many inputs measures how
+similarly their rules vary across those inputs. It is not the fixed-input,
+repeated-training correlation $\rho$ in the formula above. Application C reports
+that descriptive similarity and separately resamples training data to study
+prediction variability at fixed inputs.
+
+\idea{Randomization makes diversity possible; averaging makes diversity useful.
+Whether it helps this prediction problem is an empirical question.}
+
+\newpage
+\section*{5. OOB evaluation, importance, and decisions}
+\textbf{A bootstrap leaves some training rows out.}
+The probability that one row is absent from $n$ draws is
+\[
+q_n=(1-1/n)^n\approx e^{-1}\approx0.368.
+\]
+Its expected OOB tree count is $Bq_n$. For row $i$, average only over the
+trees that did not use it:
+\[
+\boxed{\widehat\pi_i^{\rm OOB}
+=\frac1{|\mathcal B_i|}\sum_{b\in\mathcal B_i}\widehat\pi_b(x_i),\qquad
+\mathcal B_i=\{b:i\text{ absent from bootstrap }b\}.}
+\]
+If $|\mathcal B_i|=0$, its OOB prediction is undefined. Exclude that row from
+the current OOB metric and report coverage; never replace it by zero.
+With few trees, the coverage and probability estimates can be unstable.
+OOB is an internal assessment, not an independent final test after extensive
+tuning. Learned full-data preprocessing can also compromise its interpretation.
+
+\textbf{Feature importance answers a specific question.}
+Mean decrease in impurity (MDI) totals training split gains credited to a feature,
+weighted by the fraction of training mass at each node, then normalizes across
+features. It can favor features with many candidate thresholds and reflect overfit.
+
+For validation permutation importance under Brier loss, use
+\[
+\operatorname{PI}_j=
+\operatorname{Brier}(y_{\rm val},\widehat\pi(X_{\rm val}^{\rm perm(j)}))
+-\operatorname{Brier}(y_{\rm val},\widehat\pi(X_{\rm val})).
+\]
+Permute one column, predict without refitting, and repeat the permutation to
+measure Monte Carlo variability. Positive importance means the shuffle hurt.
+Correlated predictors can substitute for each other; shuffling one also creates
+unusual combinations. Jointly shuffle a redundant pair with one shared row
+permutation to assess reliance on the pair while preserving their relationship.
+Neither method proves causation; MDI and permutation loss have different scales.
+
+\textbf{Evaluate probability quality and decision quality separately.}
+\[
+\operatorname{Brier}=\frac1m\sum_i(y_i-\widehat\pi_i)^2,\qquad
+\text{cost per row}=\frac{c_{\rm FP}\mathrm{FP}+c_{\rm FN}\mathrm{FN}}m.
+\]
+Pure leaves can give exactly 0 or 1. A wrong probability-zero event has infinite
+theoretical log loss. The notebooks explicitly clip to $[10^{-12},1-10^{-12}]$
+for reported log loss, applying the same rule to every candidate.
+
+With appropriate probabilities and zero cost for correct decisions, the
+cost-minimizing threshold is $c_{\rm FP}/(c_{\rm FP}+c_{\rm FN})$.
+Carseats uses costs 1 and 3, giving $t=0.25$. Its notebook also selects a
+validation threshold, then freezes it. Report confusion counts, precision,
+recall, and cost rather than accuracy alone.
+
+\idea{Training importance, internal OOB scores, and final test performance are
+different quantities. State which data and which loss produced each result.}
+
+\newpage
+\section*{6. The three companion notebooks}
+Each notebook runs independently and places task statements before readable code.
+Simulation seed is 17 and split seed is 23. Tables and figures are saved after
+execution. Full task details and conventions are in the notebooks.
+
+\subsection*{A. A service with regime changes}
+\code{02\_A\_service\_regimes.ipynb}
+\[
+s\sim U(0,10),\quad q\sim\operatorname{Poisson}(3),\quad
+\epsilon\sim N(0,8^2),\qquad
+y=40+20\mathbf1\{q>3\}+30\mathbf1\{q>3,s>5\}+\epsilon.
+\]
+Generate 1,200 independent requests. Verify a prefix-sum stump against every
+candidate in the six-row example. Compare a mean baseline, a linear model,
+a stump, and a depth-two tree through their prediction surfaces. Select pruning
+strength by training CV, then bootstrap training rows to inspect split and
+prediction stability. Finish with frozen-model test errors and complexity/runtime.
+
+\textbf{Main lesson:} the tree family matches this piecewise-constant simulator.
+That explains its advantage here; it does not establish a universal ranking.
+
+\subsection*{B. Carseats: categorical features and probabilities}
+\code{02\_B\_carseats.ipynb}
+
+Use the local 400-row \code{Carseats.csv}; define high sales as
+$Y=\mathbf1\{\code{Sales}>8\}$, giving 164 positives. Exclude sales from
+inputs. Fit one-hot encoding within folds, compare a logistic baseline, select
+depth/leaf controls and a pruning penalty using training CV Brier score, and
+draw a shallow tree with leaf counts and positive fractions.
+
+Use validation to audit probabilities and select an alarm threshold for costs
+1 and 3. Compare the frozen policy with prespecified probability baselines
+on the final test. Translate two paths back into ordinary feature statements.
+
+\textbf{Main lesson:} a tree predicts probabilities from local counts; small
+leaves and a small evaluation sample demand careful interpretation.
+
+\subsection*{C. Bagging, decorrelation, OOB, and importance}
+\code{02\_C\_forest\_diagnostics.ipynb}
+
+Generate 2,000 rows with 20 columns: $x_1,x_3,x_5,\ldots,x_{20}$ are
+independent $U(-1,1)$ draws, $x_2=x_1+N(0,0.03^2)$, and
+$x_4\sim\operatorname{Bernoulli}(0.5)$ is independent. Labels follow
+\[
+Y\mid x\sim\operatorname{Bernoulli}(\pi(x)),\qquad
+\pi(x)=\sigma\bigl(-0.7+2.5x_1+2\mathbf1\{x_3>0.2\}\bigr).
+\]
+Compare bagging and forests with 300 trees; select $m$ and minimum leaf size
+by training CV. Independently build bootstrap trees and audit row-specific
+OOB averages, coverage, and convergence through 600 trees. Compare tree-rule
+similarity, resampled prediction variability, MDI, and validation permutation
+importance, including a joint permutation of $(x_1,x_2)$.
+
+\textbf{Main lesson:} averaging, internal evaluation, and interpretation each
+require their own checks. Keep generating probabilities out of the input columns.
+
+\small\textbf{Further reading.} The full second lecture is in \code{PdfLectures}.
+The bundled book is James et al., \emph{An Introduction to Statistical Learning
+with Applications in R}, 2nd ed. (2021), Chapter 8.1, 8.2.1, and 8.2.2;
+Chapter 5 supplies bootstrap and validation background.
+\end{document}
